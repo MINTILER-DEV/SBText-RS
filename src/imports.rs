@@ -5,6 +5,55 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
+pub struct SourceLineOrigin {
+    pub file: PathBuf,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct MappedPosition {
+    pub file: PathBuf,
+    pub line: usize,
+    pub column: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct MergedSource {
+    pub source: String,
+    pub line_origins: Vec<SourceLineOrigin>,
+    entry_file: PathBuf,
+}
+
+impl MergedSource {
+    pub fn map_position(&self, merged_line: usize, merged_column: usize) -> MappedPosition {
+        if self.line_origins.is_empty() {
+            return MappedPosition {
+                file: self.entry_file.clone(),
+                line: merged_line.max(1),
+                column: merged_column.max(1),
+            };
+        }
+
+        if merged_line > 0 && merged_line <= self.line_origins.len() {
+            let origin = &self.line_origins[merged_line - 1];
+            return MappedPosition {
+                file: origin.file.clone(),
+                line: origin.line,
+                column: merged_column.max(1),
+            };
+        }
+
+        let last = self.line_origins.last().expect("line_origins is non-empty");
+        let extra = merged_line.saturating_sub(self.line_origins.len());
+        MappedPosition {
+            file: last.file.clone(),
+            line: last.line + extra,
+            column: merged_column.max(1),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 struct ImportSpec {
     sprite_name: String,
     relative_path: String,
@@ -14,33 +63,58 @@ struct ImportSpec {
 #[derive(Debug, Clone, Default)]
 struct ParsedFile {
     imports: Vec<ImportSpec>,
-    body: String,
+    body_lines: Vec<(String, usize)>,
     local_sprites: Vec<String>,
     has_stage: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 struct ResolvedFile {
-    merged_source: String,
+    merged_lines: Vec<String>,
+    merged_line_origins: Vec<SourceLineOrigin>,
     local_sprites: Vec<String>,
     local_has_stage: bool,
     merged_sprites: Vec<String>,
 }
 
+#[allow(dead_code)]
 pub fn resolve_merged_source(entry: &Path) -> Result<String> {
+    Ok(resolve_merged_source_with_map(entry)?.source)
+}
+
+pub fn resolve_merged_source_with_map(entry: &Path) -> Result<MergedSource> {
+    let canonical_entry = entry
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("Input file not found: '{}'.", entry.display()))?;
     let mut cache: HashMap<PathBuf, ResolvedFile> = HashMap::new();
     let mut stack: Vec<PathBuf> = Vec::new();
-    let resolved = resolve_file(entry, &mut stack, &mut cache)?;
+    let resolved = resolve_file(&canonical_entry, &mut stack, &mut cache)?;
     ensure_unique_sprite_names(&resolved.merged_sprites)?;
-    Ok(resolved.merged_source)
+    let source = if resolved.merged_lines.is_empty() {
+        String::new()
+    } else {
+        let mut out = resolved.merged_lines.join("\n");
+        out.push('\n');
+        out
+    };
+    Ok(MergedSource {
+        source,
+        line_origins: resolved.merged_line_origins,
+        entry_file: canonical_entry,
+    })
 }
 
 fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathBuf, ResolvedFile>) -> Result<ResolvedFile> {
+    let current = path
+        .canonicalize()
+        .map_err(|_| anyhow::anyhow!("Input file not found: '{}'.", path.display()))?;
     if let Some(cached) = cache.get(path) {
         return Ok(cached.clone());
     }
+    if let Some(cached) = cache.get(&current) {
+        return Ok(cached.clone());
+    }
 
-    let current = path.to_path_buf();
     if let Some(idx) = stack.iter().position(|p| p == &current) {
         let mut cycle = stack[idx..].to_vec();
         cycle.push(current.clone());
@@ -52,15 +126,16 @@ fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathB
         bail!("Circular import detected: {}", rendered);
     }
 
-    let source = fs::read_to_string(path)?;
-    let parsed = parse_file(&source, path)?;
+    let source = fs::read_to_string(&current)?;
+    let parsed = parse_file(&source, &current)?;
 
     stack.push(current.clone());
-    let mut imported_sources = String::new();
+    let mut merged_lines: Vec<String> = Vec::new();
+    let mut merged_line_origins: Vec<SourceLineOrigin> = Vec::new();
     let mut merged_sprites: Vec<String> = Vec::new();
 
     for spec in &parsed.imports {
-        let imported_path = path
+        let imported_path = current
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(&spec.relative_path)
@@ -69,7 +144,7 @@ fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathB
                 anyhow::anyhow!(
                     "Imported file does not exist: '{}' (from '{}', line {}).",
                     spec.relative_path,
-                    path.display(),
+                    current.display(),
                     spec.line
                 )
             })?;
@@ -77,35 +152,36 @@ fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathB
         let resolved_child = resolve_file(&imported_path, stack, cache)?;
         validate_import_target(
             spec,
-            path,
+            &current,
             &imported_path,
             &resolved_child.local_sprites,
             resolved_child.local_has_stage,
         )?;
 
-        imported_sources.push_str(&resolved_child.merged_source);
-        if !resolved_child.merged_source.ends_with('\n') {
-            imported_sources.push('\n');
-        }
+        merged_lines.extend(resolved_child.merged_lines.clone());
+        merged_line_origins.extend(resolved_child.merged_line_origins.clone());
         merged_sprites.extend(resolved_child.merged_sprites.clone());
     }
     stack.pop();
 
-    let mut merged_source = String::new();
-    merged_source.push_str(&imported_sources);
-    merged_source.push_str(&parsed.body);
-    if !merged_source.ends_with('\n') {
-        merged_source.push('\n');
+    for (line_text, line_no) in parsed.body_lines {
+        merged_lines.push(line_text);
+        merged_line_origins.push(SourceLineOrigin {
+            file: current.clone(),
+            line: line_no,
+        });
     }
 
     merged_sprites.extend(parsed.local_sprites.clone());
 
     let resolved = ResolvedFile {
-        merged_source,
+        merged_lines,
+        merged_line_origins,
         local_sprites: parsed.local_sprites,
         local_has_stage: parsed.has_stage,
         merged_sprites,
     };
+    cache.insert(path.to_path_buf(), resolved.clone());
     cache.insert(current, resolved.clone());
     Ok(resolved)
 }
@@ -116,7 +192,7 @@ fn parse_file(source: &str, source_path: &Path) -> Result<ParsedFile> {
     let stage_re = Regex::new(r#"^\s*stage(?:\s+("[^"]+"|[A-Za-z_][A-Za-z0-9_]*))?\s*(?:#.*)?$"#)?;
 
     let mut imports = Vec::new();
-    let mut body_lines: Vec<String> = Vec::new();
+    let mut body_lines: Vec<(String, usize)> = Vec::new();
     let mut saw_non_import_code = false;
     let mut local_sprites: Vec<String> = Vec::new();
     let mut has_stage = false;
@@ -154,12 +230,12 @@ fn parse_file(source: &str, source_path: &Path) -> Result<ParsedFile> {
             has_stage = true;
         }
 
-        body_lines.push(raw_line.to_string());
+        body_lines.push((raw_line.to_string(), line_no));
     }
 
     Ok(ParsedFile {
         imports,
-        body: body_lines.join("\n"),
+        body_lines,
         local_sprites,
         has_stage,
     })
