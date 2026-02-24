@@ -53,6 +53,21 @@ struct ProcedureSignature {
     proccode: String,
 }
 
+#[derive(Debug, Clone)]
+struct RemoteCallSpec {
+    callee_target_lower: String,
+    procedure_lower: String,
+    procedure_name: String,
+    message: String,
+    arg_var_names: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct EmittedStatement {
+    first: String,
+    last: String,
+}
+
 struct ProjectBuilder<'a> {
     project: &'a Project,
     source_dir: &'a Path,
@@ -60,6 +75,9 @@ struct ProjectBuilder<'a> {
     id_counter: usize,
     assets: HashMap<String, Vec<u8>>,
     broadcast_ids: HashMap<String, String>,
+    remote_calls: Vec<RemoteCallSpec>,
+    global_var_ids: HashMap<String, String>,
+    global_var_names: HashMap<String, String>,
 }
 
 impl<'a> ProjectBuilder<'a> {
@@ -71,11 +89,18 @@ impl<'a> ProjectBuilder<'a> {
             id_counter: 0,
             assets: HashMap::new(),
             broadcast_ids: HashMap::new(),
+            remote_calls: Vec::new(),
+            global_var_ids: HashMap::new(),
+            global_var_names: HashMap::new(),
         }
     }
 
     fn build(&mut self) -> Result<(Value, HashMap<String, Vec<u8>>)> {
         self.broadcast_ids = self.collect_broadcast_ids();
+        self.remote_calls = self.collect_remote_call_specs()?;
+        self.register_remote_call_broadcasts();
+        self.allocate_generated_global_vars();
+
         let mut ordered_targets = self.project.targets.clone();
         ordered_targets.sort_by_key(|t| if t.is_stage { 0 } else { 1 });
         if !ordered_targets.iter().any(|t| t.is_stage) {
@@ -133,20 +158,34 @@ impl<'a> ProjectBuilder<'a> {
 
     fn build_target_json(&mut self, target: &Target, layer_order: i32) -> Result<Value> {
         let mut blocks: Map<String, Value> = Map::new();
-        let mut variables_map: HashMap<String, String> = HashMap::new();
+        let mut local_variables_map: HashMap<String, String> = HashMap::new();
         let mut variables_json: Map<String, Value> = Map::new();
         let mut lists_map: HashMap<String, String> = HashMap::new();
         let mut lists_json: Map<String, Value> = Map::new();
 
         for var_decl in &target.variables {
             let var_id = self.new_id("var");
-            variables_map.insert(var_decl.name.to_lowercase(), var_id.clone());
+            local_variables_map.insert(var_decl.name.to_lowercase(), var_id.clone());
             variables_json.insert(var_id, json!([var_decl.name, 0]));
+        }
+        if target.is_stage {
+            for (var_lower, var_id) in &self.global_var_ids {
+                let var_name = self
+                    .global_var_names
+                    .get(var_lower)
+                    .ok_or_else(|| anyhow!("Missing generated global var name for '{}'.", var_lower))?;
+                variables_json.insert(var_id.clone(), json!([var_name, 0]));
+            }
         }
         for list_decl in &target.lists {
             let list_id = self.new_id("list");
             lists_map.insert(list_decl.name.to_lowercase(), list_id.clone());
             lists_json.insert(list_id, json!([list_decl.name, []]));
+        }
+
+        let mut variables_map = local_variables_map.clone();
+        for (k, v) in &self.global_var_ids {
+            variables_map.insert(k.clone(), v.clone());
         }
 
         let signatures = self.build_procedure_signatures(target);
@@ -173,6 +212,14 @@ impl<'a> ProjectBuilder<'a> {
             )?;
             y_cursor += 40;
         }
+        let _ = self.emit_remote_call_handlers(
+            &mut blocks,
+            target,
+            &signatures,
+            &variables_map,
+            &lists_map,
+            y_cursor,
+        )?;
 
         let costumes = self.build_costumes(target)?;
         let stage_broadcasts = if target.is_stage {
@@ -250,6 +297,207 @@ impl<'a> ProjectBuilder<'a> {
             );
         }
         signatures
+    }
+
+    fn collect_remote_call_specs(&self) -> Result<Vec<RemoteCallSpec>> {
+        let mut local_procs: HashMap<String, (String, String, usize)> = HashMap::new();
+        for target in &self.project.targets {
+            let target_lower = target.name.to_lowercase();
+            for procedure in &target.procedures {
+                local_procs.insert(
+                    format!("{}.{}", target_lower, procedure.name.to_lowercase()),
+                    (target.name.clone(), procedure.name.clone(), procedure.params.len()),
+                );
+            }
+        }
+
+        let mut out: HashMap<String, RemoteCallSpec> = HashMap::new();
+        for target in &self.project.targets {
+            for script in &target.scripts {
+                self.collect_remote_calls_from_statements(&script.body, &local_procs, &mut out)?;
+            }
+            for procedure in &target.procedures {
+                self.collect_remote_calls_from_statements(&procedure.body, &local_procs, &mut out)?;
+            }
+        }
+
+        let mut specs = out.into_values().collect::<Vec<_>>();
+        specs.sort_by(|a, b| a.message.cmp(&b.message));
+        Ok(specs)
+    }
+
+    fn collect_remote_calls_from_statements(
+        &self,
+        statements: &[Statement],
+        local_procs: &HashMap<String, (String, String, usize)>,
+        out: &mut HashMap<String, RemoteCallSpec>,
+    ) -> Result<()> {
+        for stmt in statements {
+            match stmt {
+                Statement::ProcedureCall { name, args, .. } => {
+                    if let Some((target_name, proc_name)) = split_qualified(name) {
+                        let key = format!("{}.{}", target_name.to_lowercase(), proc_name.to_lowercase());
+                        let Some((_target_display, proc_display, expected_args)) = local_procs.get(&key) else {
+                            bail!("Unknown remote procedure '{}' during codegen scan.", name);
+                        };
+                        if *expected_args != args.len() {
+                            bail!(
+                                "Remote procedure '{}' expects {} args, got {}.",
+                                name,
+                                expected_args,
+                                args.len()
+                            );
+                        }
+                        out.entry(key.clone()).or_insert_with(|| {
+                            let arg_var_names = (0..*expected_args)
+                                .map(|i| {
+                                    format!(
+                                        "__rpc__{}__{}__arg{}",
+                                        target_name.to_lowercase(),
+                                        proc_name.to_lowercase(),
+                                        i + 1
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            RemoteCallSpec {
+                                callee_target_lower: target_name.to_lowercase(),
+                                procedure_lower: proc_name.to_lowercase(),
+                                procedure_name: proc_display.clone(),
+                                message: format!(
+                                    "__rpc__{}__{}",
+                                    target_name.to_lowercase(),
+                                    proc_name.to_lowercase()
+                                ),
+                                arg_var_names,
+                            }
+                        });
+                    }
+                }
+                Statement::Repeat { body, .. }
+                | Statement::RepeatUntil { body, .. }
+                | Statement::Forever { body, .. } => {
+                    self.collect_remote_calls_from_statements(body, local_procs, out)?;
+                }
+                Statement::If {
+                    then_body,
+                    else_body,
+                    ..
+                } => {
+                    self.collect_remote_calls_from_statements(then_body, local_procs, out)?;
+                    self.collect_remote_calls_from_statements(else_body, local_procs, out)?;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn register_remote_call_broadcasts(&mut self) {
+        let remote_calls = self.remote_calls.clone();
+        for spec in &remote_calls {
+            if !self.broadcast_ids.contains_key(&spec.message) {
+                let id = self.new_id("broadcast");
+                self.broadcast_ids.insert(spec.message.clone(), id);
+            }
+        }
+    }
+
+    fn allocate_generated_global_vars(&mut self) {
+        let remote_calls = self.remote_calls.clone();
+        for spec in &remote_calls {
+            for var_name in &spec.arg_var_names {
+                let key = var_name.to_lowercase();
+                if self.global_var_ids.contains_key(&key) {
+                    continue;
+                }
+                let id = self.new_id("gvar");
+                self.global_var_ids.insert(key.clone(), id);
+                self.global_var_names.insert(key, var_name.clone());
+            }
+        }
+    }
+
+    fn lookup_remote_call_spec(
+        &self,
+        callee_target: &str,
+        callee_proc: &str,
+        arg_count: usize,
+    ) -> Result<&RemoteCallSpec> {
+        let target_lower = callee_target.to_lowercase();
+        let proc_lower = callee_proc.to_lowercase();
+        let spec = self
+            .remote_calls
+            .iter()
+            .find(|s| s.callee_target_lower == target_lower && s.procedure_lower == proc_lower)
+            .ok_or_else(|| anyhow!("Unknown remote procedure '{}.{}'.", callee_target, callee_proc))?;
+        if spec.arg_var_names.len() != arg_count {
+            bail!(
+                "Remote procedure '{}.{}' expects {} args, got {}.",
+                callee_target,
+                callee_proc,
+                spec.arg_var_names.len(),
+                arg_count
+            );
+        }
+        Ok(spec)
+    }
+
+    fn emit_remote_call_handlers(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        target: &Target,
+        signatures: &HashMap<String, ProcedureSignature>,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        mut start_y: i32,
+    ) -> Result<i32> {
+        let target_lower = target.name.to_lowercase();
+        let handlers = self
+            .remote_calls
+            .iter()
+            .filter(|s| s.callee_target_lower == target_lower)
+            .cloned()
+            .collect::<Vec<_>>();
+        for handler in handlers {
+            let hat_id = self.new_block_id();
+            let bid = self.broadcast_id(&handler.message);
+            blocks.insert(
+                hat_id.clone(),
+                json!({
+                    "opcode": "event_whenbroadcastreceived",
+                    "next": Value::Null,
+                    "parent": Value::Null,
+                    "inputs": {},
+                    "fields": {"BROADCAST_OPTION": [handler.message, bid]},
+                    "shadow": false,
+                    "topLevel": true,
+                    "x": 580,
+                    "y": start_y
+                }),
+            );
+
+            let args = handler
+                .arg_var_names
+                .iter()
+                .map(|name| Expr::Var {
+                    pos: target.pos,
+                    name: name.clone(),
+                })
+                .collect::<Vec<_>>();
+            let emitted = self.emit_call_stmt(
+                blocks,
+                &hat_id,
+                &handler.procedure_name,
+                &args,
+                signatures,
+                variables_map,
+                lists_map,
+                &HashSet::new(),
+            )?;
+            set_block_next(blocks, &hat_id, Value::String(emitted.first))?;
+            start_y += 140;
+        }
+        Ok(start_y)
     }
 
     fn new_id(&mut self, prefix: &str) -> String {
@@ -441,10 +689,10 @@ impl<'a> ProjectBuilder<'a> {
         param_scope: &HashSet<String>,
     ) -> Result<(Option<String>, Option<String>)> {
         let mut first: Option<String> = None;
-        let mut prev: Option<String> = None;
+        let mut prev_last: Option<String> = None;
         for stmt in statements {
-            let stmt_parent = prev.clone().unwrap_or_else(|| parent_id.to_string());
-            let stmt_id = self.emit_statement(
+            let stmt_parent = prev_last.clone().unwrap_or_else(|| parent_id.to_string());
+            let emitted = self.emit_statement(
                 blocks,
                 stmt,
                 &stmt_parent,
@@ -453,15 +701,15 @@ impl<'a> ProjectBuilder<'a> {
                 signatures,
                 param_scope,
             )?;
-            if let Some(prev_id) = &prev {
-                set_block_next(blocks, prev_id, Value::String(stmt_id.clone()))?;
+            if let Some(prev_id) = &prev_last {
+                set_block_next(blocks, prev_id, Value::String(emitted.first.clone()))?;
             }
             if first.is_none() {
-                first = Some(stmt_id.clone());
+                first = Some(emitted.first.clone());
             }
-            prev = Some(stmt_id);
+            prev_last = Some(emitted.last);
         }
-        Ok((first, prev))
+        Ok((first, prev_last))
     }
 
     fn emit_statement(
@@ -473,29 +721,49 @@ impl<'a> ProjectBuilder<'a> {
         lists_map: &HashMap<String, String>,
         signatures: &HashMap<String, ProcedureSignature>,
         param_scope: &HashSet<String>,
-    ) -> Result<String> {
+    ) -> Result<EmittedStatement> {
+        let single = |id: String| EmittedStatement {
+            first: id.clone(),
+            last: id,
+        };
         match stmt {
-            Statement::Broadcast { message, .. } => self.emit_broadcast_stmt(blocks, parent_id, message),
+            Statement::Broadcast { message, .. } => {
+                Ok(single(self.emit_broadcast_stmt(blocks, parent_id, message)?))
+            }
             Statement::SetVar {
                 var_name, value, ..
-            } => self.emit_set_stmt(blocks, parent_id, var_name, value, variables_map, lists_map, param_scope),
+            } => Ok(single(self.emit_set_stmt(
+                blocks,
+                parent_id,
+                var_name,
+                value,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
             Statement::ChangeVar {
                 var_name, delta, ..
-            } => self.emit_change_stmt(blocks, parent_id, var_name, delta, variables_map, lists_map, param_scope),
-            Statement::Move { steps, .. } => {
-                self.emit_single_input_stmt(
-                    blocks,
-                    parent_id,
-                    "motion_movesteps",
-                    "STEPS",
-                    steps,
-                    variables_map,
-                    lists_map,
-                    param_scope,
-                    "number",
-                )
-            }
-            Statement::Say { message, .. } => self.emit_single_input_stmt(
+            } => Ok(single(self.emit_change_stmt(
+                blocks,
+                parent_id,
+                var_name,
+                delta,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::Move { steps, .. } => Ok(single(self.emit_single_input_stmt(
+                blocks,
+                parent_id,
+                "motion_movesteps",
+                "STEPS",
+                steps,
+                variables_map,
+                lists_map,
+                param_scope,
+                "number",
+            )?)),
+            Statement::Say { message, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "looks_say",
@@ -505,8 +773,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "string",
-            ),
-            Statement::Think { message, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::Think { message, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "looks_think",
@@ -516,8 +784,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "string",
-            ),
-            Statement::TurnRight { degrees, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::TurnRight { degrees, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_turnright",
@@ -527,8 +795,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::TurnLeft { degrees, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::TurnLeft { degrees, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_turnleft",
@@ -538,11 +806,17 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::GoToXY { x, y, .. } => {
-                self.emit_go_to_xy_stmt(blocks, parent_id, x, y, variables_map, lists_map, param_scope)
-            }
-            Statement::ChangeXBy { value, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::GoToXY { x, y, .. } => Ok(single(self.emit_go_to_xy_stmt(
+                blocks,
+                parent_id,
+                x,
+                y,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::ChangeXBy { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_changexby",
@@ -552,8 +826,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::SetX { value, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::SetX { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_setx",
@@ -563,8 +837,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::ChangeYBy { value, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::ChangeYBy { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_changeyby",
@@ -574,8 +848,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::SetY { value, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::SetY { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_sety",
@@ -585,8 +859,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::PointInDirection { direction, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::PointInDirection { direction, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "motion_pointindirection",
@@ -596,9 +870,9 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::IfOnEdgeBounce { .. } => self.emit_no_input_stmt(blocks, parent_id, "motion_ifonedgebounce"),
-            Statement::ChangeSizeBy { value, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::IfOnEdgeBounce { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "motion_ifonedgebounce")?)),
+            Statement::ChangeSizeBy { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "looks_changesizeby",
@@ -608,8 +882,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::SetSizeTo { value, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::SetSizeTo { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "looks_setsizeto",
@@ -619,12 +893,12 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::Show { .. } => self.emit_no_input_stmt(blocks, parent_id, "looks_show"),
-            Statement::Hide { .. } => self.emit_no_input_stmt(blocks, parent_id, "looks_hide"),
-            Statement::NextCostume { .. } => self.emit_no_input_stmt(blocks, parent_id, "looks_nextcostume"),
-            Statement::NextBackdrop { .. } => self.emit_no_input_stmt(blocks, parent_id, "looks_nextbackdrop"),
-            Statement::Wait { duration, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::Show { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_show")?)),
+            Statement::Hide { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_hide")?)),
+            Statement::NextCostume { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextcostume")?)),
+            Statement::NextBackdrop { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextbackdrop")?)),
+            Statement::Wait { duration, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "control_wait",
@@ -634,8 +908,8 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
-            ),
-            Statement::Repeat { times, body, .. } => self.emit_repeat_stmt(
+            )?)),
+            Statement::Repeat { times, body, .. } => Ok(single(self.emit_repeat_stmt(
                 blocks,
                 parent_id,
                 times,
@@ -644,16 +918,34 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 signatures,
                 param_scope,
-            ),
-            Statement::Forever { body, .. } => {
-                self.emit_forever_stmt(blocks, parent_id, body, variables_map, lists_map, signatures, param_scope)
-            }
+            )?)),
+            Statement::RepeatUntil {
+                condition, body, ..
+            } => Ok(single(self.emit_repeat_until_stmt(
+                blocks,
+                parent_id,
+                condition,
+                body,
+                variables_map,
+                lists_map,
+                signatures,
+                param_scope,
+            )?)),
+            Statement::Forever { body, .. } => Ok(single(self.emit_forever_stmt(
+                blocks,
+                parent_id,
+                body,
+                variables_map,
+                lists_map,
+                signatures,
+                param_scope,
+            )?)),
             Statement::If {
                 condition,
                 then_body,
                 else_body,
                 ..
-            } => self.emit_if_stmt(
+            } => Ok(single(self.emit_if_stmt(
                 blocks,
                 parent_id,
                 condition,
@@ -663,11 +955,16 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 signatures,
                 param_scope,
-            ),
-            Statement::Stop { option, .. } => {
-                self.emit_stop_stmt(blocks, parent_id, option, variables_map, lists_map, param_scope)
-            }
-            Statement::Ask { question, .. } => self.emit_single_input_stmt(
+            )?)),
+            Statement::Stop { option, .. } => Ok(single(self.emit_stop_stmt(
+                blocks,
+                parent_id,
+                option,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::Ask { question, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
                 "sensing_askandwait",
@@ -677,23 +974,42 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "string",
-            ),
-            Statement::ResetTimer { .. } => self.emit_no_input_stmt(blocks, parent_id, "sensing_resettimer"),
+            )?)),
+            Statement::ResetTimer { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "sensing_resettimer")?)),
             Statement::AddToList {
                 list_name, item, ..
-            } => self.emit_add_to_list_stmt(blocks, parent_id, list_name, item, variables_map, lists_map, param_scope),
+            } => Ok(single(self.emit_add_to_list_stmt(
+                blocks,
+                parent_id,
+                list_name,
+                item,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
             Statement::DeleteOfList {
                 list_name, index, ..
-            } => self.emit_delete_of_list_stmt(blocks, parent_id, list_name, index, variables_map, lists_map, param_scope),
-            Statement::DeleteAllOfList { list_name, .. } => {
-                self.emit_delete_all_of_list_stmt(blocks, parent_id, list_name, lists_map)
-            }
+            } => Ok(single(self.emit_delete_of_list_stmt(
+                blocks,
+                parent_id,
+                list_name,
+                index,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::DeleteAllOfList { list_name, .. } => Ok(single(self.emit_delete_all_of_list_stmt(
+                blocks,
+                parent_id,
+                list_name,
+                lists_map,
+            )?)),
             Statement::InsertAtList {
                 list_name,
                 item,
                 index,
                 ..
-            } => self.emit_insert_at_list_stmt(
+            } => Ok(single(self.emit_insert_at_list_stmt(
                 blocks,
                 parent_id,
                 list_name,
@@ -702,13 +1018,13 @@ impl<'a> ProjectBuilder<'a> {
                 variables_map,
                 lists_map,
                 param_scope,
-            ),
+            )?)),
             Statement::ReplaceItemOfList {
                 list_name,
                 index,
                 item,
                 ..
-            } => self.emit_replace_item_of_list_stmt(
+            } => Ok(single(self.emit_replace_item_of_list_stmt(
                 blocks,
                 parent_id,
                 list_name,
@@ -717,10 +1033,17 @@ impl<'a> ProjectBuilder<'a> {
                 variables_map,
                 lists_map,
                 param_scope,
+            )?)),
+            Statement::ProcedureCall { name, args, .. } => self.emit_call_stmt(
+                blocks,
+                parent_id,
+                name,
+                args,
+                signatures,
+                variables_map,
+                lists_map,
+                param_scope,
             ),
-            Statement::ProcedureCall { name, args, .. } => {
-                self.emit_call_stmt(blocks, parent_id, name, args, signatures, variables_map, lists_map, param_scope)
-            }
         }
     }
 
@@ -971,6 +1294,47 @@ impl<'a> ProjectBuilder<'a> {
         Ok(block_id)
     }
 
+    fn emit_repeat_until_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        condition: &Expr,
+        body: &[Statement],
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        signatures: &HashMap<String, ProcedureSignature>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let cond_input = self.expr_input(
+            blocks,
+            condition,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "boolean",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "control_repeat_until",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"CONDITION": cond_input},
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        let (sub_first, _) =
+            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        if let Some(substack) = sub_first {
+            set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
+        }
+        Ok(block_id)
+    }
+
     fn emit_forever_stmt(
         &mut self,
         blocks: &mut Map<String, Value>,
@@ -1104,7 +1468,19 @@ impl<'a> ProjectBuilder<'a> {
         variables_map: &HashMap<String, String>,
         lists_map: &HashMap<String, String>,
         param_scope: &HashSet<String>,
-    ) -> Result<String> {
+    ) -> Result<EmittedStatement> {
+        if let Some((callee_target, callee_proc)) = split_qualified(name) {
+            return self.emit_remote_call_stmt(
+                blocks,
+                parent_id,
+                callee_target,
+                callee_proc,
+                args,
+                variables_map,
+                lists_map,
+                param_scope,
+            );
+        }
         let sig = signatures
             .get(&name.to_lowercase())
             .ok_or_else(|| anyhow!("Unknown procedure '{}' during codegen.", name))?;
@@ -1139,6 +1515,112 @@ impl<'a> ProjectBuilder<'a> {
                     "argumentids": serde_json::to_string(&sig.arg_ids)?,
                     "warp": "false"
                 }
+            }),
+        );
+        Ok(EmittedStatement {
+            first: block_id.clone(),
+            last: block_id,
+        })
+    }
+
+    fn emit_remote_call_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        callee_target: &str,
+        callee_proc: &str,
+        args: &[Expr],
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<EmittedStatement> {
+        let spec = self.lookup_remote_call_spec(callee_target, callee_proc, args.len())?.clone();
+        let mut first: Option<String> = None;
+        let mut prev: Option<String> = None;
+
+        for (idx, expr) in args.iter().enumerate() {
+            let arg_var_name = spec
+                .arg_var_names
+                .get(idx)
+                .ok_or_else(|| anyhow!("Internal error: missing RPC arg variable for index {}.", idx))?;
+            let arg_var_id = self.lookup_var_id(variables_map, arg_var_name)?;
+            let block_id = self.new_block_id();
+            let val_input = self.expr_input(
+                blocks,
+                expr,
+                &block_id,
+                variables_map,
+                lists_map,
+                param_scope,
+                "string",
+            )?;
+            let parent = prev.clone().unwrap_or_else(|| parent_id.to_string());
+            blocks.insert(
+                block_id.clone(),
+                json!({
+                    "opcode": "data_setvariableto",
+                    "next": Value::Null,
+                    "parent": parent,
+                    "inputs": {"VALUE": val_input},
+                    "fields": {"VARIABLE": [arg_var_name, arg_var_id]},
+                    "shadow": false,
+                    "topLevel": false
+                }),
+            );
+            if let Some(prev_id) = &prev {
+                set_block_next(blocks, prev_id, Value::String(block_id.clone()))?;
+            }
+            if first.is_none() {
+                first = Some(block_id.clone());
+            }
+            prev = Some(block_id);
+        }
+
+        let parent_for_broadcast = prev.clone().unwrap_or_else(|| parent_id.to_string());
+        let broadcast_id = self.emit_broadcast_and_wait_stmt(blocks, &parent_for_broadcast, &spec.message)?;
+        if let Some(prev_id) = &prev {
+            set_block_next(blocks, prev_id, Value::String(broadcast_id.clone()))?;
+        } else {
+            first = Some(broadcast_id.clone());
+        }
+
+        Ok(EmittedStatement {
+            first: first.unwrap_or_else(|| broadcast_id.clone()),
+            last: broadcast_id,
+        })
+    }
+
+    fn emit_broadcast_and_wait_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        message: &str,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let menu_id = self.new_block_id();
+        let bid = self.broadcast_id(message);
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "event_broadcastandwait",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"BROADCAST_INPUT": [1, menu_id.clone()]},
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        blocks.insert(
+            menu_id,
+            json!({
+                "opcode": "event_broadcast_menu",
+                "next": Value::Null,
+                "parent": block_id.clone(),
+                "inputs": {},
+                "fields": {"BROADCAST_OPTION": [message, bid]},
+                "shadow": true,
+                "topLevel": false
             }),
         );
         Ok(block_id)
@@ -1346,6 +1828,35 @@ impl<'a> ProjectBuilder<'a> {
                 Ok(Some(block_id))
             }
             Expr::Var { name, .. } => {
+                if let Some((remote_target, remote_var)) = split_qualified(name) {
+                    let block_id = self.new_block_id();
+                    let menu_id = self.new_block_id();
+                    blocks.insert(
+                        block_id.clone(),
+                        json!({
+                            "opcode": "sensing_of",
+                            "next": Value::Null,
+                            "parent": parent_id,
+                            "inputs": {"OBJECT": [1, menu_id.clone()]},
+                            "fields": {"PROPERTY": [remote_var, Value::Null]},
+                            "shadow": false,
+                            "topLevel": false
+                        }),
+                    );
+                    blocks.insert(
+                        menu_id,
+                        json!({
+                            "opcode": "sensing_of_object_menu",
+                            "next": Value::Null,
+                            "parent": block_id.clone(),
+                            "inputs": {},
+                            "fields": {"OBJECT": [remote_target, Value::Null]},
+                            "shadow": true,
+                            "topLevel": false
+                        }),
+                    );
+                    return Ok(Some(block_id));
+                }
                 let lowered = name.to_lowercase();
                 if param_scope.contains(&lowered) {
                     let block_id = self.new_block_id();
@@ -1944,7 +2455,9 @@ fn collect_messages_from_statements(statements: &[Statement], out: &mut HashSet<
             Statement::Broadcast { message, .. } => {
                 out.insert(message.clone());
             }
-            Statement::Repeat { body, .. } | Statement::Forever { body, .. } => {
+            Statement::Repeat { body, .. }
+            | Statement::RepeatUntil { body, .. }
+            | Statement::Forever { body, .. } => {
                 collect_messages_from_statements(body, out);
             }
             Statement::If {
@@ -1988,6 +2501,17 @@ fn default_shadow(kind: &str) -> Value {
     } else {
         json!([10, ""])
     }
+}
+
+fn split_qualified(name: &str) -> Option<(&str, &str)> {
+    let (left, right) = name.split_once('.')?;
+    if left.is_empty() || right.is_empty() {
+        return None;
+    }
+    if right.contains('.') {
+        return None;
+    }
+    Some((left, right))
 }
 
 fn set_block_next(blocks: &mut Map<String, Value>, block_id: &str, next: Value) -> Result<()> {
