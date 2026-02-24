@@ -1,0 +1,24 @@
+use clap::Parser;
+use std::path::PathBuf;
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "sbtext-rs",
+    about = "Rust SBText compiler (native backend by default, optional Python parity backend)."
+)]
+pub struct Args {
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
+
+    #[arg(value_name = "OUTPUT")]
+    pub output: Option<PathBuf>,
+
+    #[arg(long, help = "Disable automatic SVG normalization to 64x64.")]
+    pub no_svg_scale: bool,
+
+    #[arg(long, help = "Write merged source after resolving imports to this path.")]
+    pub emit_merged: Option<PathBuf>,
+
+    #[arg(long, help = "Use Python backend instead of native Rust backend (parity checks only).")]
+    pub python_backend: bool,
+}
