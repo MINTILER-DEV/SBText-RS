@@ -121,6 +121,11 @@ pub enum Statement {
         times: Expr,
         body: Vec<Statement>,
     },
+    RepeatUntil {
+        pos: Position,
+        condition: Expr,
+        body: Vec<Statement>,
+    },
     Forever {
         pos: Position,
         body: Vec<Statement>,
@@ -242,6 +247,7 @@ impl Statement {
             | Statement::Think { pos, .. }
             | Statement::Wait { pos, .. }
             | Statement::Repeat { pos, .. }
+            | Statement::RepeatUntil { pos, .. }
             | Statement::Forever { pos, .. }
             | Statement::If { pos, .. }
             | Statement::ProcedureCall { pos, .. }

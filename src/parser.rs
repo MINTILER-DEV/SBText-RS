@@ -346,6 +346,33 @@ impl Parser {
 
     fn parse_repeat_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("repeat", "Expected 'repeat'.")?.pos;
+        if self.match_keyword("until") {
+            let mut condition_tokens = self.collect_tokens_until_newline()?;
+            if condition_tokens.is_empty() {
+                return Err(ParseError {
+                    message: "Expected condition after 'repeat until'.".to_string(),
+                    pos: start,
+                });
+            }
+            if condition_tokens[0].typ == TokenType::Op
+                && condition_tokens[0].value == "<"
+                && condition_tokens
+                    .last()
+                    .map(|t| t.typ == TokenType::Op && t.value == ">")
+                    .unwrap_or(false)
+            {
+                condition_tokens = condition_tokens[1..condition_tokens.len() - 1].to_vec();
+            }
+            let condition = self.parse_expression_from_tokens(condition_tokens)?;
+            self.skip_newlines();
+            let body = self.parse_statement_block(&["end"], false)?;
+            self.consume_keyword("end", "Expected 'end' to close repeat-until block.")?;
+            return Ok(Statement::RepeatUntil {
+                pos: start,
+                condition,
+                body,
+            });
+        }
         let times = self.parse_wrapped_expression()?;
         self.skip_newlines();
         let body = self.parse_statement_block(&["end"], false)?;
@@ -856,6 +883,30 @@ impl Parser {
                 && depth_paren == 0
                 && depth_bracket == 0
             {
+                break;
+            }
+            match token.typ {
+                TokenType::LParen => depth_paren += 1,
+                TokenType::RParen => depth_paren -= 1,
+                TokenType::LBracket => depth_bracket += 1,
+                TokenType::RBracket => depth_bracket -= 1,
+                _ => {}
+            }
+            out.push(self.advance());
+        }
+        if depth_paren != 0 || depth_bracket != 0 {
+            return self.error_here("Unbalanced delimiters while reading condition.");
+        }
+        Ok(out)
+    }
+
+    fn collect_tokens_until_newline(&mut self) -> Result<Vec<Token>, ParseError> {
+        let mut out = Vec::new();
+        let mut depth_paren: i32 = 0;
+        let mut depth_bracket: i32 = 0;
+        while !self.at_end() {
+            let token = self.current().clone();
+            if token.typ == TokenType::Newline && depth_paren == 0 && depth_bracket == 0 {
                 break;
             }
             match token.typ {

@@ -194,6 +194,8 @@ impl<'a> Lexer<'a> {
             let ch = self.peek();
             if ch.is_ascii_alphanumeric() || ch == '_' || ch == '?' {
                 text.push(self.advance());
+            } else if ch == '.' {
+                text.push(self.advance());
             } else {
                 break;
             }
@@ -382,6 +384,7 @@ fn keyword_set() -> HashSet<&'static str> {
         "timer",
         "to",
         "turn",
+        "until",
         "var",
         "wait",
         "when",
