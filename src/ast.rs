@@ -90,6 +90,10 @@ pub enum Statement {
         pos: Position,
         message: String,
     },
+    BroadcastAndWait {
+        pos: Position,
+        message: String,
+    },
     SetVar {
         pos: Position,
         var_name: String,
@@ -108,6 +112,11 @@ pub enum Statement {
         pos: Position,
         message: Expr,
     },
+    SayForSeconds {
+        pos: Position,
+        message: Expr,
+        duration: Expr,
+    },
     Think {
         pos: Position,
         message: Expr,
@@ -115,6 +124,10 @@ pub enum Statement {
     Wait {
         pos: Position,
         duration: Expr,
+    },
+    WaitUntil {
+        pos: Position,
+        condition: Expr,
     },
     Repeat {
         pos: Position,
@@ -240,12 +253,15 @@ impl Statement {
     pub fn pos(&self) -> Position {
         match self {
             Statement::Broadcast { pos, .. }
+            | Statement::BroadcastAndWait { pos, .. }
             | Statement::SetVar { pos, .. }
             | Statement::ChangeVar { pos, .. }
             | Statement::Move { pos, .. }
             | Statement::Say { pos, .. }
+            | Statement::SayForSeconds { pos, .. }
             | Statement::Think { pos, .. }
             | Statement::Wait { pos, .. }
+            | Statement::WaitUntil { pos, .. }
             | Statement::Repeat { pos, .. }
             | Statement::RepeatUntil { pos, .. }
             | Statement::Forever { pos, .. }

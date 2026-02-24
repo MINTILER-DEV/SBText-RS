@@ -272,9 +272,18 @@ impl Parser {
 
     fn parse_broadcast_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("broadcast", "Expected 'broadcast'.")?.pos;
+        let wait = if self.match_keyword("and") {
+            self.consume_keyword("wait", "Expected 'wait' after 'broadcast and'.")?;
+            true
+        } else {
+            false
+        };
         let message = self.parse_bracket_text()?;
         if message.is_empty() {
             return self.error_here("Broadcast message cannot be empty.");
+        }
+        if wait {
+            return Ok(Statement::BroadcastAndWait { pos: start, message });
         }
         Ok(Statement::Broadcast { pos: start, message })
     }
@@ -335,6 +344,15 @@ impl Parser {
     fn parse_say_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("say", "Expected 'say'.")?.pos;
         let message = self.parse_wrapped_expression()?;
+        if self.match_keyword("for") {
+            let duration = self.parse_wrapped_expression()?;
+            self.match_keyword("seconds");
+            return Ok(Statement::SayForSeconds {
+                pos: start,
+                message,
+                duration,
+            });
+        }
         Ok(Statement::Say { pos: start, message })
     }
 
@@ -347,23 +365,7 @@ impl Parser {
     fn parse_repeat_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("repeat", "Expected 'repeat'.")?.pos;
         if self.match_keyword("until") {
-            let mut condition_tokens = self.collect_tokens_until_newline()?;
-            if condition_tokens.is_empty() {
-                return Err(ParseError {
-                    message: "Expected condition after 'repeat until'.".to_string(),
-                    pos: start,
-                });
-            }
-            if condition_tokens[0].typ == TokenType::Op
-                && condition_tokens[0].value == "<"
-                && condition_tokens
-                    .last()
-                    .map(|t| t.typ == TokenType::Op && t.value == ">")
-                    .unwrap_or(false)
-            {
-                condition_tokens = condition_tokens[1..condition_tokens.len() - 1].to_vec();
-            }
-            let condition = self.parse_expression_from_tokens(condition_tokens)?;
+            let condition = self.parse_condition_until_newline(start, "repeat until")?;
             self.skip_newlines();
             let body = self.parse_statement_block(&["end"], false)?;
             self.consume_keyword("end", "Expected 'end' to close repeat-until block.")?;
@@ -450,8 +452,32 @@ impl Parser {
 
     fn parse_wait_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("wait", "Expected 'wait'.")?.pos;
+        if self.match_keyword("until") {
+            let condition = self.parse_condition_until_newline(start, "wait until")?;
+            return Ok(Statement::WaitUntil { pos: start, condition });
+        }
         let duration = self.parse_wrapped_expression()?;
         Ok(Statement::Wait { pos: start, duration })
+    }
+
+    fn parse_condition_until_newline(&mut self, start: Position, context: &str) -> Result<Expr, ParseError> {
+        let mut condition_tokens = self.collect_tokens_until_newline()?;
+        if condition_tokens.is_empty() {
+            return Err(ParseError {
+                message: format!("Expected condition after '{}'.", context),
+                pos: start,
+            });
+        }
+        if condition_tokens[0].typ == TokenType::Op
+            && condition_tokens[0].value == "<"
+            && condition_tokens
+                .last()
+                .map(|t| t.typ == TokenType::Op && t.value == ">")
+                .unwrap_or(false)
+        {
+            condition_tokens = condition_tokens[1..condition_tokens.len() - 1].to_vec();
+        }
+        self.parse_expression_from_tokens(condition_tokens)
     }
 
     fn parse_stop_stmt(&mut self) -> Result<Statement, ParseError> {

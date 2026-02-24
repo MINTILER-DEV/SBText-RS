@@ -204,6 +204,16 @@ fn analyze_statements(
                     });
                 }
             }
+            Statement::BroadcastAndWait { message, pos } => {
+                if message.is_empty() {
+                    return Err(SemanticError {
+                        message: format!(
+                            "Broadcast message cannot be empty at line {}, column {} in target '{}'.",
+                            pos.line, pos.column, target.name
+                        ),
+                    });
+                }
+            }
             Statement::SetVar { var_name, value, pos } => {
                 ensure_variable_exists(target, var_name, variables, param_scope, pos.line, pos.column)?;
                 analyze_expr(target, value, variables, lists, target_infos, param_scope)?;
@@ -218,11 +228,20 @@ fn analyze_statements(
             Statement::Say { message, .. } => {
                 analyze_expr(target, message, variables, lists, target_infos, param_scope)?
             }
+            Statement::SayForSeconds {
+                message, duration, ..
+            } => {
+                analyze_expr(target, message, variables, lists, target_infos, param_scope)?;
+                analyze_expr(target, duration, variables, lists, target_infos, param_scope)?;
+            }
             Statement::Think { message, .. } => {
                 analyze_expr(target, message, variables, lists, target_infos, param_scope)?
             }
             Statement::Wait { duration, .. } => {
                 analyze_expr(target, duration, variables, lists, target_infos, param_scope)?
+            }
+            Statement::WaitUntil { condition, .. } => {
+                analyze_expr(target, condition, variables, lists, target_infos, param_scope)?
             }
             Statement::Repeat { times, body, .. } => {
                 analyze_expr(target, times, variables, lists, target_infos, param_scope)?;
