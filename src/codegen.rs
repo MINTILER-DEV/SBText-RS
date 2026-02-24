@@ -1927,6 +1927,37 @@ impl<'a> ProjectBuilder<'a> {
                 );
                 Ok(Some(block_id))
             }
+            Expr::MathFunc { op, value, .. } => {
+                let block_id = self.new_block_id();
+                let opcode = if op == "round" {
+                    "operator_round"
+                } else if op == "floor" {
+                    "operator_mathop"
+                } else {
+                    bail!("Unsupported math reporter '{}'.", op);
+                };
+                let fields = if op == "floor" {
+                    json!({"OPERATOR": ["floor", Value::Null]})
+                } else {
+                    json!({})
+                };
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": opcode,
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {},
+                        "fields": fields,
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                let num_input =
+                    self.expr_input(blocks, value, &block_id, variables_map, lists_map, param_scope, "number")?;
+                set_block_input(blocks, &block_id, "NUM", num_input)?;
+                Ok(Some(block_id))
+            }
             Expr::Var { name, .. } => {
                 if let Some((remote_target, remote_var)) = split_qualified(name) {
                     let block_id = self.new_block_id();

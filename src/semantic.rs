@@ -499,6 +499,7 @@ fn analyze_expr(
             Ok(())
         }
         Expr::Unary { operand, .. } => analyze_expr(target, operand, variables, lists, target_infos, param_scope),
+        Expr::MathFunc { value, .. } => analyze_expr(target, value, variables, lists, target_infos, param_scope),
         Expr::Binary { left, right, .. } => {
             analyze_expr(target, left, variables, lists, target_infos, param_scope)?;
             analyze_expr(target, right, variables, lists, target_infos, param_scope)

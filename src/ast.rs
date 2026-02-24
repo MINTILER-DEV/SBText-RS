@@ -53,6 +53,11 @@ pub enum Expr {
         pos: Position,
         kind: String,
     },
+    MathFunc {
+        pos: Position,
+        op: String,
+        value: Box<Expr>,
+    },
     Unary {
         pos: Position,
         op: String,
@@ -78,6 +83,7 @@ impl Expr {
             | Expr::ListContains { pos, .. }
             | Expr::KeyPressed { pos, .. }
             | Expr::BuiltinReporter { pos, .. }
+            | Expr::MathFunc { pos, .. }
             | Expr::Unary { pos, .. }
             | Expr::Binary { pos, .. } => *pos,
         }

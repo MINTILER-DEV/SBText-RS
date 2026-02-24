@@ -692,6 +692,12 @@ impl Parser {
         if self.check_keyword("key") {
             return self.parse_key_pressed_expr();
         }
+        if self.check_keyword("floor") {
+            return self.parse_math_func_expr("floor");
+        }
+        if self.check_keyword("round") {
+            return self.parse_math_func_expr("round");
+        }
         if self.check_keyword("answer") {
             let start = self.consume_keyword("answer", "Expected 'answer'.")?.pos;
             return Ok(Expr::BuiltinReporter {
@@ -828,6 +834,16 @@ impl Parser {
         Ok(Expr::KeyPressed {
             pos: start,
             key: Box::new(key),
+        })
+    }
+
+    fn parse_math_func_expr(&mut self, op: &str) -> Result<Expr, ParseError> {
+        let start = self.consume_keyword(op, format!("Expected '{}'.", op).as_str())?.pos;
+        let value = self.parse_wrapped_expression()?;
+        Ok(Expr::MathFunc {
+            pos: start,
+            op: op.to_string(),
+            value: Box::new(value),
         })
     }
 
