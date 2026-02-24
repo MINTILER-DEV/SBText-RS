@@ -93,13 +93,13 @@ impl Parser {
             }
             if self.match_keyword("var") {
                 let prev = self.previous().pos;
-                let var_name = self.parse_name_token()?;
+                let var_name = self.parse_decl_name_token()?;
                 target.variables.push(VariableDecl { pos: prev, name: var_name });
                 continue;
             }
             if self.match_keyword("list") {
                 let prev = self.previous().pos;
-                let list_name = self.parse_name_token()?;
+                let list_name = self.parse_decl_name_token()?;
                 target.lists.push(ListDecl { pos: prev, name: list_name });
                 continue;
             }
@@ -135,7 +135,7 @@ impl Parser {
             if self.check_type(TokenType::RParen) {
                 return self.error_here("Empty parameter declaration is not allowed.");
             }
-            let param = self.parse_name_token()?;
+            let param = self.parse_decl_name_token()?;
             self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
             params.push(param);
         }
@@ -487,6 +487,7 @@ impl Parser {
         let index = self.parse_wrapped_expression()?;
         self.consume_keyword("of", "Expected 'of' in list replace statement.")?;
         let list_name = self.parse_list_field_name()?;
+        self.skip_newlines();
         self.consume_keyword("with", "Expected 'with' in list replace statement.")?;
         let item = self.parse_wrapped_expression()?;
         Ok(Statement::ReplaceItemOfList {
@@ -696,6 +697,13 @@ impl Parser {
                 name: token.value,
             });
         }
+        if token.typ == TokenType::Keyword {
+            self.advance();
+            return Ok(Expr::Var {
+                pos: token.pos,
+                name: token.value,
+            });
+        }
         if token.typ == TokenType::LParen {
             self.advance();
             let expr = self.parse_expression(&[TokenType::RParen], 1)?;
@@ -868,6 +876,15 @@ impl Parser {
     fn parse_name_token(&mut self) -> Result<String, ParseError> {
         let token = self.current().clone();
         if token.typ == TokenType::Ident || token.typ == TokenType::String {
+            self.advance();
+            return Ok(token.value);
+        }
+        self.error_here("Expected name.")
+    }
+
+    fn parse_decl_name_token(&mut self) -> Result<String, ParseError> {
+        let token = self.current().clone();
+        if token.typ == TokenType::Ident || token.typ == TokenType::String || token.typ == TokenType::Keyword {
             self.advance();
             return Ok(token.value);
         }
