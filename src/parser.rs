@@ -346,7 +346,12 @@ impl Parser {
         let message = self.parse_wrapped_expression()?;
         if self.match_keyword("for") {
             let duration = self.parse_wrapped_expression()?;
-            self.match_keyword("seconds");
+            if !self.match_keyword("seconds") && self.check_type(TokenType::LBracket) {
+                let unit = self.parse_bracket_text()?;
+                if !unit.eq_ignore_ascii_case("seconds") {
+                    return self.error_here("Expected 'seconds' or '[seconds]' after say duration.");
+                }
+            }
             return Ok(Statement::SayForSeconds {
                 pos: start,
                 message,
