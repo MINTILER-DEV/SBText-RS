@@ -730,6 +730,9 @@ impl<'a> ProjectBuilder<'a> {
             Statement::Broadcast { message, .. } => {
                 Ok(single(self.emit_broadcast_stmt(blocks, parent_id, message)?))
             }
+            Statement::BroadcastAndWait { message, .. } => {
+                Ok(single(self.emit_broadcast_and_wait_stmt(blocks, parent_id, message)?))
+            }
             Statement::SetVar {
                 var_name, value, ..
             } => Ok(single(self.emit_set_stmt(
@@ -773,6 +776,17 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "string",
+            )?)),
+            Statement::SayForSeconds {
+                message, duration, ..
+            } => Ok(single(self.emit_say_for_seconds_stmt(
+                blocks,
+                parent_id,
+                message,
+                duration,
+                variables_map,
+                lists_map,
+                param_scope,
             )?)),
             Statement::Think { message, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
@@ -908,6 +922,14 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
                 "number",
+            )?)),
+            Statement::WaitUntil { condition, .. } => Ok(single(self.emit_wait_until_stmt(
+                blocks,
+                parent_id,
+                condition,
+                variables_map,
+                lists_map,
+                param_scope,
             )?)),
             Statement::Repeat { times, body, .. } => Ok(single(self.emit_repeat_stmt(
                 blocks,
@@ -1093,6 +1115,84 @@ impl<'a> ProjectBuilder<'a> {
                 "next": Value::Null,
                 "parent": parent_id,
                 "inputs": { input_name: input },
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_say_for_seconds_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        message: &Expr,
+        duration: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let message_input = self.expr_input(
+            blocks,
+            message,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "string",
+        )?;
+        let secs_input = self.expr_input(
+            blocks,
+            duration,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "looks_sayforsecs",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"MESSAGE": message_input, "SECS": secs_input},
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_wait_until_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        condition: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let cond_input = self.expr_input(
+            blocks,
+            condition,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "boolean",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "control_wait_until",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"CONDITION": cond_input},
                 "fields": {},
                 "shadow": false,
                 "topLevel": false
@@ -2453,6 +2553,9 @@ fn collect_messages_from_statements(statements: &[Statement], out: &mut HashSet<
     for stmt in statements {
         match stmt {
             Statement::Broadcast { message, .. } => {
+                out.insert(message.clone());
+            }
+            Statement::BroadcastAndWait { message, .. } => {
                 out.insert(message.clone());
             }
             Statement::Repeat { body, .. }
