@@ -12,6 +12,10 @@ Current state:
 - Uses native Rust backend for `.sb3` generation by default.
 - Can invoke the existing Python backend with `--python-backend` for parity checks.
 
+## Language docs
+
+- Full syntax and semantics reference: `SYNTAX.md`
+
 ## Build
 
 ```bash
