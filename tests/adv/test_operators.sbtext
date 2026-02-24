@@ -1,0 +1,17 @@
+sprite MathTest
+  when flag clicked
+    say ((5) + (3))
+    say ((10) - (2))
+    say ((4) * (2))
+    say ((8) / (2))
+    say (pick random (1) to (10))
+
+    if <(5) > (3)> then
+      say ("greater")
+    end
+
+    if <(5) = (5)> then
+      say ("equal")
+    end
+  end
+end

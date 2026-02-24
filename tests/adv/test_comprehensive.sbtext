@@ -1,0 +1,33 @@
+stage
+  costume "assets/backdrop.svg"
+
+  when flag clicked
+    broadcast [init]
+  end
+end
+
+sprite Player
+  costume "assets/player.svg"
+
+  var health
+  list inventory
+
+  define damage (amount)
+    change [health] by (0 - (amount))
+  end
+
+  when I receive [init]
+    set [health] to (100)
+    add ("sword") to [inventory]
+  end
+
+  when this sprite clicked
+    damage (25)
+
+    if <([health]) <= (0)> then
+      say ("game over")
+    else
+      say ([health])
+    end
+  end
+end

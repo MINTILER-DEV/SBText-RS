@@ -1,0 +1,12 @@
+sprite Stage
+  var counter
+
+  when flag clicked
+    set [counter] to (0)
+
+    repeat (5)
+      say ([counter])
+      change [counter] by (1)
+    end
+  end
+end

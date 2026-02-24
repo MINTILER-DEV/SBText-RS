@@ -1,0 +1,23 @@
+sprite Stage
+  when flag clicked
+    broadcast ["start"]
+  end
+end
+
+sprite Enemy
+  var health
+
+  when I receive ["start"]
+    set [health] to (50)
+  end
+
+  when this sprite clicked
+    change [health] by (-5)
+
+    if <([health]) <= (0)> then
+      say ("enemy defeated")
+    else
+      say ([health])
+    end
+  end
+end

@@ -1,0 +1,11 @@
+stage
+  when flag clicked
+    broadcast [start]
+  end
+end
+
+sprite Listener
+  when I receive [start]
+    say ("received")
+  end
+end

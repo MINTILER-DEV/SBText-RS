@@ -1,0 +1,39 @@
+stage
+  costume "assets/backdrop.svg"
+
+  when flag clicked
+    broadcast [init]
+  end
+end
+
+sprite Player
+  costume "assets/player_idle.svg"
+  costume "assets/player_hit.svg"
+
+  var health
+
+  define damage (amount)
+    change [health] by (0 - (amount))
+  end
+
+  when I receive [init]
+    set [health] to (100)
+    say ("ready")
+  end
+
+  when this sprite clicked
+    damage (20)
+
+    if <([health]) <= (0)> then
+      say ("game over")
+    else
+      say ([health])
+    end
+  end
+
+  when flag clicked
+    repeat (10)
+      move (10) steps
+    end
+  end
+end

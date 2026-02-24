@@ -1,0 +1,15 @@
+sprite Sensor
+  when flag clicked
+    ask ("what is your name?")
+    say (answer)
+
+    if <key ("space") pressed?> then
+      say ("space pressed")
+    end
+
+    say (mouse x)
+    say (mouse y)
+    say (timer)
+    reset timer
+  end
+end

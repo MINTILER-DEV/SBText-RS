@@ -1,0 +1,14 @@
+sprite Mover
+  when flag clicked
+    move (10) steps
+    turn right (15)
+    turn left (15)
+    go to x (0) y (0)
+    change x by (5)
+    set x to (100)
+    change y by (-5)
+    set y to (50)
+    point in direction (90)
+    if on edge bounce
+  end
+end

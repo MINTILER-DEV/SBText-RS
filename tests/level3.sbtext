@@ -1,0 +1,16 @@
+sprite Player
+  var health
+
+  define damage (amount)
+    change [health] by (0 - (amount))
+  end
+
+  when flag clicked
+    set [health] to (100)
+  end
+
+  when this sprite clicked
+    damage (10)
+    say (health)
+  end
+end

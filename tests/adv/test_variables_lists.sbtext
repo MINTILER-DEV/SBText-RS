@@ -1,0 +1,24 @@
+sprite DataTest
+  var score
+  list scores
+
+  when flag clicked
+    set [score] to (10)
+    change [score] by (5)
+
+    add (10) to [scores]
+    add (20) to [scores]
+    insert (15) at (2) of [scores]
+    replace item (1) of [scores] with (99)
+
+    say (item (1) of [scores])
+    say (length of [scores])
+
+    if <[scores] contains (20)> then
+      say ("found 20")
+    end
+
+    delete (1) of [scores]
+    delete all of [scores]
+  end
+end

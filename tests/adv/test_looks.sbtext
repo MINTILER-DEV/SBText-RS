@@ -1,0 +1,12 @@
+sprite Actor
+  when flag clicked
+    say ("hello")
+    think ("hmm")
+    change size by (10)
+    set size to (100)
+    show
+    hide
+    next costume
+    next backdrop
+  end
+end

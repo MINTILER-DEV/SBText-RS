@@ -1,0 +1,16 @@
+sprite Controller
+  var counter
+
+  when flag clicked
+    set [counter] to (0)
+
+    repeat (5)
+      change [counter] by (1)
+    end
+
+    forever
+      wait (1)
+      stop ("this script")
+    end
+  end
+end
