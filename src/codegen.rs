@@ -11,8 +11,8 @@ use std::path::Path;
 use xmltree::{Element, XMLNode};
 use zip::write::SimpleFileOptions;
 
-const DEFAULT_STAGE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="480" height="360" viewBox="0 0 480 360"><rect width="480" height="360" fill="#ffffff"/></svg>"##;
-const DEFAULT_SPRITE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96"><circle cx="48" cy="48" r="40" fill="#4c97ff"/></svg>"##;
+const DEFAULT_STAGE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
+const DEFAULT_SPRITE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
 const DEFAULT_SVG_TARGET_SIZE: f64 = 64.0;
 
 #[derive(Debug, Clone, Copy)]
@@ -429,6 +429,8 @@ impl<'a> ProjectBuilder<'a> {
                     }
                 }
                 Statement::Repeat { body, .. }
+                | Statement::ForEach { body, .. }
+                | Statement::While { body, .. }
                 | Statement::RepeatUntil { body, .. }
                 | Statement::Forever { body, .. } => {
                     self.collect_remote_calls_from_statements(body, local_procs, out)?;
@@ -1068,6 +1070,34 @@ impl<'a> ProjectBuilder<'a> {
                 signatures,
                 param_scope,
             )?)),
+            Statement::ForEach {
+                var_name,
+                value,
+                body,
+                ..
+            } => Ok(single(self.emit_for_each_stmt(
+                blocks,
+                parent_id,
+                var_name,
+                value,
+                body,
+                variables_map,
+                lists_map,
+                signatures,
+                param_scope,
+            )?)),
+            Statement::While {
+                condition, body, ..
+            } => Ok(single(self.emit_while_stmt(
+                blocks,
+                parent_id,
+                condition,
+                body,
+                variables_map,
+                lists_map,
+                signatures,
+                param_scope,
+            )?)),
             Statement::RepeatUntil {
                 condition, body, ..
             } => Ok(single(self.emit_repeat_until_stmt(
@@ -1557,6 +1587,90 @@ impl<'a> ProjectBuilder<'a> {
                 "next": Value::Null,
                 "parent": parent_id,
                 "inputs": {"TIMES": times_input},
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        let (sub_first, _) =
+            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        if let Some(substack) = sub_first {
+            set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
+        }
+        Ok(block_id)
+    }
+
+    fn emit_for_each_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        var_name: &str,
+        value: &Expr,
+        body: &[Statement],
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        signatures: &HashMap<String, ProcedureSignature>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let var_id = self.lookup_var_id(variables_map, var_name)?;
+        let block_id = self.new_block_id();
+        let value_input = self.expr_input(
+            blocks,
+            value,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "control_for_each",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"VALUE": value_input},
+                "fields": {"VARIABLE": [var_name, var_id]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        let (sub_first, _) =
+            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        if let Some(substack) = sub_first {
+            set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
+        }
+        Ok(block_id)
+    }
+
+    fn emit_while_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        condition: &Expr,
+        body: &[Statement],
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        signatures: &HashMap<String, ProcedureSignature>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let cond_input = self.expr_input(
+            blocks,
+            condition,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "boolean",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "control_while",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"CONDITION": cond_input},
                 "fields": {},
                 "shadow": false,
                 "topLevel": false
@@ -2833,6 +2947,8 @@ fn collect_messages_from_statements(statements: &[Statement], out: &mut HashSet<
                 out.insert(message.clone());
             }
             Statement::Repeat { body, .. }
+            | Statement::ForEach { body, .. }
+            | Statement::While { body, .. }
             | Statement::RepeatUntil { body, .. }
             | Statement::Forever { body, .. } => {
                 collect_messages_from_statements(body, out);
@@ -2873,6 +2989,8 @@ fn statements_use_pen_extension(statements: &[Statement]) -> bool {
             | Statement::ChangePenColorParamBy { .. }
             | Statement::SetPenColorParamTo { .. } => return true,
             Statement::Repeat { body, .. }
+            | Statement::ForEach { body, .. }
+            | Statement::While { body, .. }
             | Statement::RepeatUntil { body, .. }
             | Statement::Forever { body, .. } => {
                 if statements_use_pen_extension(body) {

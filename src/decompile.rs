@@ -418,6 +418,28 @@ fn decompile_statement(
             out.append(&mut body);
             out.push(format!("{}end", pad));
         }
+        "control_for_each" => {
+            let var = field_first_string(block, "VARIABLE").unwrap_or_else(|| "i".to_string());
+            let value = expr_from_input(blocks, block, "VALUE")?;
+            out.push(format!(
+                "{}for each [{}] in ({})",
+                pad,
+                format_bracket_name(&var),
+                value
+            ));
+            let sub = block_input_block_id(block, "SUBSTACK");
+            let mut body = decompile_chain(blocks, sub.as_deref(), indent + 2, visited)?;
+            out.append(&mut body);
+            out.push(format!("{}end", pad));
+        }
+        "control_while" => {
+            let c = expr_from_input(blocks, block, "CONDITION")?;
+            out.push(format!("{}while <{}>", pad, c));
+            let sub = block_input_block_id(block, "SUBSTACK");
+            let mut body = decompile_chain(blocks, sub.as_deref(), indent + 2, visited)?;
+            out.append(&mut body);
+            out.push(format!("{}end", pad));
+        }
         "control_repeat_until" => {
             let c = expr_from_input(blocks, block, "CONDITION")?;
             out.push(format!("{}repeat until <{}>", pad, c));

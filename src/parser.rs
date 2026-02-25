@@ -240,6 +240,12 @@ impl Parser {
         if self.check_keyword("repeat") {
             return self.parse_repeat_stmt();
         }
+        if self.check_keyword("for") {
+            return self.parse_for_each_stmt();
+        }
+        if self.check_keyword("while") {
+            return self.parse_while_stmt();
+        }
         if self.check_keyword("forever") {
             return self.parse_forever_stmt();
         }
@@ -435,6 +441,40 @@ impl Parser {
         let body = self.parse_statement_block(&["end"], false)?;
         self.consume_keyword("end", "Expected 'end' to close repeat block.")?;
         Ok(Statement::Repeat { pos: start, times, body })
+    }
+
+    fn parse_for_each_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("for", "Expected 'for'.")?.pos;
+        self.consume_keyword("each", "Expected 'each' after 'for'.")?;
+        let var_name = if self.check_type(TokenType::LBracket) {
+            self.parse_variable_field_name()?
+        } else {
+            self.parse_decl_name_token()?
+        };
+        self.consume_keyword("in", "Expected 'in' in for-each statement.")?;
+        let value = self.parse_wrapped_expression()?;
+        self.skip_newlines();
+        let body = self.parse_statement_block(&["end"], false)?;
+        self.consume_keyword("end", "Expected 'end' to close for-each block.")?;
+        Ok(Statement::ForEach {
+            pos: start,
+            var_name,
+            value,
+            body,
+        })
+    }
+
+    fn parse_while_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("while", "Expected 'while'.")?.pos;
+        let condition = self.parse_condition_until_newline(start, "while")?;
+        self.skip_newlines();
+        let body = self.parse_statement_block(&["end"], false)?;
+        self.consume_keyword("end", "Expected 'end' to close while block.")?;
+        Ok(Statement::While {
+            pos: start,
+            condition,
+            body,
+        })
     }
 
     fn parse_forever_stmt(&mut self) -> Result<Statement, ParseError> {

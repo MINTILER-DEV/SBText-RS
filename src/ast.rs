@@ -140,6 +140,17 @@ pub enum Statement {
         times: Expr,
         body: Vec<Statement>,
     },
+    ForEach {
+        pos: Position,
+        var_name: String,
+        value: Expr,
+        body: Vec<Statement>,
+    },
+    While {
+        pos: Position,
+        condition: Expr,
+        body: Vec<Statement>,
+    },
     RepeatUntil {
         pos: Position,
         condition: Expr,
@@ -299,6 +310,8 @@ impl Statement {
             | Statement::Wait { pos, .. }
             | Statement::WaitUntil { pos, .. }
             | Statement::Repeat { pos, .. }
+            | Statement::ForEach { pos, .. }
+            | Statement::While { pos, .. }
             | Statement::RepeatUntil { pos, .. }
             | Statement::Forever { pos, .. }
             | Statement::If { pos, .. }

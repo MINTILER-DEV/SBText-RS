@@ -268,6 +268,48 @@ fn analyze_statements(
                     scope_name,
                 )?;
             }
+            Statement::ForEach {
+                var_name,
+                value,
+                body,
+                pos,
+            } => {
+                ensure_variable_exists(
+                    target,
+                    var_name,
+                    variables,
+                    target_infos,
+                    param_scope,
+                    pos.line,
+                    pos.column,
+                )?;
+                analyze_expr(target, value, variables, lists, target_infos, param_scope)?;
+                analyze_statements(
+                    target,
+                    body,
+                    variables,
+                    lists,
+                    procedures,
+                    target_infos,
+                    param_scope,
+                    scope_name,
+                )?;
+            }
+            Statement::While {
+                condition, body, ..
+            } => {
+                analyze_expr(target, condition, variables, lists, target_infos, param_scope)?;
+                analyze_statements(
+                    target,
+                    body,
+                    variables,
+                    lists,
+                    procedures,
+                    target_infos,
+                    param_scope,
+                    scope_name,
+                )?;
+            }
             Statement::RepeatUntil {
                 condition, body, ..
             } => {
