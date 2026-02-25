@@ -16,9 +16,24 @@ pub struct Args {
     #[arg(long, help = "Disable automatic SVG normalization to 64x64.")]
     pub no_svg_scale: bool,
 
-    #[arg(long, help = "Write merged source after resolving imports to this path.")]
+    #[arg(
+        long,
+        help = "Write merged source after resolving imports to this path."
+    )]
     pub emit_merged: Option<PathBuf>,
 
-    #[arg(long, help = "Use Python backend instead of native Rust backend (parity checks only).")]
+    #[arg(
+        long,
+        help = "Use Python backend instead of native Rust backend (parity checks only)."
+    )]
     pub python_backend: bool,
+
+    #[arg(long, help = "Decompile .sb3 input into .sbtext source.")]
+    pub decompile: bool,
+
+    #[arg(
+        long,
+        help = "When used with --decompile, writes output as multiple sprite files plus main.sbtext (stage)."
+    )]
+    pub split_sprites: bool,
 }

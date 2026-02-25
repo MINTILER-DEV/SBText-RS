@@ -11,6 +11,9 @@ pub mod cli;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_backend;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decompile;
+
 use anyhow::Result;
 use codegen::CodegenOptions;
 use imports::{resolve_merged_source_with_map, MergedSource};
@@ -24,6 +27,21 @@ pub mod wasm;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_cli(args: &cli::Args) -> Result<()> {
+    if args.decompile {
+        if args.python_backend {
+            anyhow::bail!("--python-backend cannot be used with --decompile.");
+        }
+        if args.emit_merged.is_some() {
+            anyhow::bail!("--emit-merged cannot be used with --decompile.");
+        }
+        let input = canonicalize_file(&args.input)?;
+        return decompile::decompile_sb3(&input, args.output.as_deref(), args.split_sprites);
+    }
+
+    if args.split_sprites {
+        anyhow::bail!("--split-sprites requires --decompile.");
+    }
+
     let input = canonicalize_file(&args.input)?;
     let merged = resolve_merged_source_with_map(&input)?;
     let project = parse_and_validate_project(&merged)?;
