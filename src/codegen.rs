@@ -2623,10 +2623,21 @@ impl<'a> ProjectBuilder<'a> {
             };
 
             if ext == "svg" {
-                let (prepared, cx, cy) = self.prepare_svg(&data, &costume.path)?;
-                data = prepared;
-                rotation_center_x = cx;
-                rotation_center_y = cy;
+                match self.prepare_svg(&data, &costume.path) {
+                    Ok((prepared, cx, cy)) => {
+                        data = prepared;
+                        rotation_center_x = cx;
+                        rotation_center_y = cy;
+                    }
+                    Err(err) if is_nonpositive_viewbox_error(&err) => {
+                        eprintln!(
+                            "Skipping SVG costume '{}' for target '{}' due to non-positive viewBox dimensions.",
+                            costume.path, target.name
+                        );
+                        continue;
+                    }
+                    Err(err) => return Err(err),
+                }
             }
 
             let digest = format!("{:x}", md5::compute(&data));
@@ -2644,6 +2655,25 @@ impl<'a> ProjectBuilder<'a> {
                 set_value_key(&mut entry, "bitmapResolution", json!(1))?;
             }
             out.push(entry);
+        }
+        if out.is_empty() {
+            let fallback_svg = if target.is_stage {
+                DEFAULT_STAGE_SVG.as_bytes()
+            } else {
+                DEFAULT_SPRITE_SVG.as_bytes()
+            };
+            let (prepared, cx, cy) = self.prepare_svg(fallback_svg, "__fallback_default__.svg")?;
+            let digest = format!("{:x}", md5::compute(&prepared));
+            let md5ext = format!("{}.svg", digest);
+            self.assets.insert(md5ext.clone(), prepared);
+            out.push(json!({
+                "name": if target.is_stage { "backdrop1" } else { "costume1" },
+                "assetId": digest,
+                "md5ext": md5ext,
+                "dataFormat": "svg",
+                "rotationCenterX": cx,
+                "rotationCenterY": cy
+            }));
         }
         Ok(out)
     }
@@ -2960,4 +2990,9 @@ fn set_value_key(value: &mut Value, key: &str, entry: Value) -> Result<()> {
         .ok_or_else(|| anyhow!("Expected object while setting key '{}'.", key))?;
     obj.insert(key.to_string(), entry);
     Ok(())
+}
+
+fn is_nonpositive_viewbox_error(err: &anyhow::Error) -> bool {
+    err.to_string()
+        .contains("SVG viewBox must have positive width/height")
 }
