@@ -77,7 +77,7 @@ Import line notes:
 
 ### 4.4 Reserved keywords
 
-`add all and answer ask at backdrop bounce broadcast by change clicked contains costume define delete direction edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop then think this timer to turn until var wait when with x y`
+`add all and answer ask at backdrop bounce broadcast by change clicked contains costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop then think this timer to turn until var wait when while with x y`
 
 ## 5) File and target structure
 
@@ -183,6 +183,14 @@ next backdrop
 
 ```sbtext
 repeat (expr)
+  ...
+end
+
+for each [var_name] in (expr)
+  ...
+end
+
+while <condition_expr>
   ...
 end
 
