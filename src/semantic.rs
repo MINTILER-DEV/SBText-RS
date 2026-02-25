@@ -26,6 +26,7 @@ struct ProcedureInfo {
 struct TargetInfo {
     name: String,
     variables: HashSet<String>,
+    lists: HashSet<String>,
     procedures: HashMap<String, usize>,
 }
 
@@ -57,6 +58,10 @@ pub fn analyze(project: &Project) -> Result<(), SemanticError> {
         for decl in &target.variables {
             vars.insert(decl.name.to_lowercase());
         }
+        let mut lists = HashSet::new();
+        for decl in &target.lists {
+            lists.insert(decl.name.to_lowercase());
+        }
         let mut procs = HashMap::new();
         for procedure in &target.procedures {
             procs.insert(procedure.name.to_lowercase(), procedure.params.len());
@@ -66,6 +71,7 @@ pub fn analyze(project: &Project) -> Result<(), SemanticError> {
             TargetInfo {
                 name: target.name.clone(),
                 variables: vars,
+                lists,
                 procedures: procs,
             },
         );
@@ -82,12 +88,7 @@ fn analyze_target(target: &Target, target_infos: &HashMap<String, TargetInfo>) -
     for decl in &target.variables {
         let lowered = decl.name.to_lowercase();
         if variables.contains_key(&lowered) {
-            return Err(SemanticError {
-                message: format!(
-                    "Duplicate variable '{}' in target '{}' at line {}, column {}.",
-                    decl.name, target.name, decl.pos.line, decl.pos.column
-                ),
-            });
+            continue;
         }
         variables.insert(lowered, decl.pos.line);
     }
@@ -96,12 +97,7 @@ fn analyze_target(target: &Target, target_infos: &HashMap<String, TargetInfo>) -
     for decl in &target.lists {
         let lowered = decl.name.to_lowercase();
         if lists.contains_key(&lowered) {
-            return Err(SemanticError {
-                message: format!(
-                    "Duplicate list '{}' in target '{}' at line {}, column {}.",
-                    decl.name, target.name, decl.pos.line, decl.pos.column
-                ),
-            });
+            continue;
         }
         lists.insert(lowered, decl.pos.line);
     }
@@ -215,11 +211,27 @@ fn analyze_statements(
                 }
             }
             Statement::SetVar { var_name, value, pos } => {
-                ensure_variable_exists(target, var_name, variables, param_scope, pos.line, pos.column)?;
+                ensure_variable_exists(
+                    target,
+                    var_name,
+                    variables,
+                    target_infos,
+                    param_scope,
+                    pos.line,
+                    pos.column,
+                )?;
                 analyze_expr(target, value, variables, lists, target_infos, param_scope)?;
             }
             Statement::ChangeVar { var_name, delta, pos } => {
-                ensure_variable_exists(target, var_name, variables, param_scope, pos.line, pos.column)?;
+                ensure_variable_exists(
+                    target,
+                    var_name,
+                    variables,
+                    target_infos,
+                    param_scope,
+                    pos.line,
+                    pos.column,
+                )?;
                 analyze_expr(target, delta, variables, lists, target_infos, param_scope)?;
             }
             Statement::Move { steps, .. } => {
@@ -312,7 +324,21 @@ fn analyze_statements(
                 )?;
             }
             Statement::ProcedureCall { name, args, pos } => {
-                if let Some((remote_target_name, remote_proc_name)) = split_qualified(name) {
+                if let Some(proc_info) = procedures.get(&name.to_lowercase()) {
+                    if args.len() != proc_info.params.len() {
+                        return Err(SemanticError {
+                            message: format!(
+                                "Procedure '{}' expects {} argument(s), got {} at line {}, column {} in {}.",
+                                name,
+                                proc_info.params.len(),
+                                args.len(),
+                                pos.line,
+                                pos.column,
+                                scope_name
+                            ),
+                        });
+                    }
+                } else if let Some((remote_target_name, remote_proc_name)) = split_qualified(name) {
                     let Some(remote_target) = target_infos.get(&remote_target_name.to_lowercase()) else {
                         return Err(SemanticError {
                             message: format!(
@@ -344,35 +370,18 @@ fn analyze_statements(
                         });
                     }
                 } else {
-                    let Some(proc_info) = procedures.get(&name.to_lowercase()) else {
-                        return Err(SemanticError {
-                            message: format!(
-                                "Unknown procedure '{}' at line {}, column {} in target '{}'.",
-                                name, pos.line, pos.column, target.name
-                            ),
-                        });
-                    };
-                    if pos.line < proc_info.line {
-                        return Err(SemanticError {
-                            message: format!(
-                                "Procedure '{}' is used before it is defined (call line {}, definition line {}) in target '{}'.",
-                                name, pos.line, proc_info.line, target.name
-                            ),
-                        });
+                    if is_ignored_noop_call(name) {
+                        for arg in args {
+                            analyze_expr(target, arg, variables, lists, target_infos, param_scope)?;
+                        }
+                        continue;
                     }
-                    if args.len() != proc_info.params.len() {
-                        return Err(SemanticError {
-                            message: format!(
-                                "Procedure '{}' expects {} argument(s), got {} at line {}, column {} in {}.",
-                                name,
-                                proc_info.params.len(),
-                                args.len(),
-                                pos.line,
-                                pos.column,
-                                scope_name
-                            ),
-                        });
-                    }
+                    return Err(SemanticError {
+                        message: format!(
+                            "Unknown procedure '{}' at line {}, column {} in target '{}'.",
+                            name, pos.line, pos.column, target.name
+                        ),
+                    });
                 }
                 for arg in args {
                     analyze_expr(target, arg, variables, lists, target_infos, param_scope)?;
@@ -424,7 +433,7 @@ fn analyze_statements(
                 item,
                 pos,
             } => {
-                ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+                ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
                 analyze_expr(target, item, variables, lists, target_infos, param_scope)?;
             }
             Statement::DeleteOfList {
@@ -432,11 +441,11 @@ fn analyze_statements(
                 index,
                 pos,
             } => {
-                ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+                ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
                 analyze_expr(target, index, variables, lists, target_infos, param_scope)?;
             }
             Statement::DeleteAllOfList { list_name, pos } => {
-                ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+                ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
             }
             Statement::InsertAtList {
                 list_name,
@@ -444,7 +453,7 @@ fn analyze_statements(
                 index,
                 pos,
             } => {
-                ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+                ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
                 analyze_expr(target, item, variables, lists, target_infos, param_scope)?;
                 analyze_expr(target, index, variables, lists, target_infos, param_scope)?;
             }
@@ -454,7 +463,7 @@ fn analyze_statements(
                 item,
                 pos,
             } => {
-                ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+                ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
                 analyze_expr(target, index, variables, lists, target_infos, param_scope)?;
                 analyze_expr(target, item, variables, lists, target_infos, param_scope)?;
             }
@@ -473,6 +482,13 @@ fn analyze_expr(
 ) -> Result<(), SemanticError> {
     match expr {
         Expr::Var { name, pos } => {
+            let lowered = name.to_lowercase();
+            if param_scope.contains(&lowered)
+                || variables.contains_key(&lowered)
+                || variable_exists_anywhere(target_infos, &lowered)
+            {
+                return Ok(());
+            }
             if let Some((remote_target_name, remote_var_name)) = split_qualified(name) {
                 let Some(remote_target) = target_infos.get(&remote_target_name.to_lowercase()) else {
                     return Err(SemanticError {
@@ -492,19 +508,12 @@ fn analyze_expr(
                 }
                 return Ok(());
             }
-            let lowered = name.to_lowercase();
-            if param_scope.contains(&lowered) {
-                return Ok(());
-            }
-            if !variables.contains_key(&lowered) {
-                return Err(SemanticError {
-                    message: format!(
-                        "Unknown variable '{}' at line {}, column {} in target '{}'.",
-                        name, pos.line, pos.column, target.name
-                    ),
-                });
-            }
-            Ok(())
+            Err(SemanticError {
+                message: format!(
+                    "Unknown variable '{}' at line {}, column {} in target '{}'.",
+                    name, pos.line, pos.column, target.name
+                ),
+            })
         }
         Expr::Unary { operand, .. } => analyze_expr(target, operand, variables, lists, target_infos, param_scope),
         Expr::MathFunc { value, .. } => analyze_expr(target, value, variables, lists, target_infos, param_scope),
@@ -521,18 +530,18 @@ fn analyze_expr(
             index,
             pos,
         } => {
-            ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+            ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
             analyze_expr(target, index, variables, lists, target_infos, param_scope)
         }
         Expr::ListLength { list_name, pos } => {
-            ensure_list_exists(target, list_name, lists, pos.line, pos.column)
+            ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)
         }
         Expr::ListContains {
             list_name,
             item,
             pos,
         } => {
-            ensure_list_exists(target, list_name, lists, pos.line, pos.column)?;
+            ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
             analyze_expr(target, item, variables, lists, target_infos, param_scope)
         }
         Expr::KeyPressed { key, .. } => analyze_expr(target, key, variables, lists, target_infos, param_scope),
@@ -555,6 +564,7 @@ fn ensure_variable_exists(
     target: &Target,
     name: &str,
     variables: &HashMap<String, usize>,
+    target_infos: &HashMap<String, TargetInfo>,
     param_scope: &HashSet<String>,
     line: usize,
     column: usize,
@@ -568,31 +578,49 @@ fn ensure_variable_exists(
             ),
         });
     }
-    if !variables.contains_key(&lowered) {
-        return Err(SemanticError {
-            message: format!(
-                "Unknown variable '{}' at line {}, column {} in target '{}'.",
-                name, line, column, target.name
-            ),
-        });
+    if variables.contains_key(&lowered) || variable_exists_anywhere(target_infos, &lowered) {
+        return Ok(());
     }
-    Ok(())
+    Err(SemanticError {
+        message: format!(
+            "Unknown variable '{}' at line {}, column {} in target '{}'.",
+            name, line, column, target.name
+        ),
+    })
 }
 
 fn ensure_list_exists(
     target: &Target,
     name: &str,
     lists: &HashMap<String, usize>,
+    target_infos: &HashMap<String, TargetInfo>,
     line: usize,
     column: usize,
 ) -> Result<(), SemanticError> {
-    if !lists.contains_key(&name.to_lowercase()) {
-        return Err(SemanticError {
-            message: format!(
-                "Unknown list '{}' at line {}, column {} in target '{}'.",
-                name, line, column, target.name
-            ),
-        });
+    let lowered = name.to_lowercase();
+    if lists.contains_key(&lowered) || list_exists_anywhere(target_infos, &lowered) {
+        return Ok(());
     }
-    Ok(())
+    Err(SemanticError {
+        message: format!(
+            "Unknown list '{}' at line {}, column {} in target '{}'.",
+            name, line, column, target.name
+        ),
+    })
+}
+
+fn variable_exists_anywhere(target_infos: &HashMap<String, TargetInfo>, lowered_name: &str) -> bool {
+    target_infos
+        .values()
+        .any(|target| target.variables.contains(lowered_name))
+}
+
+fn list_exists_anywhere(target_infos: &HashMap<String, TargetInfo>, lowered_name: &str) -> bool {
+    target_infos
+        .values()
+        .any(|target| target.lists.contains(lowered_name))
+}
+
+fn is_ignored_noop_call(name: &str) -> bool {
+    name.eq_ignore_ascii_case("log")
 }

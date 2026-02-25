@@ -85,6 +85,8 @@ struct ProjectBuilder<'a> {
     remote_calls: Vec<RemoteCallSpec>,
     global_var_ids: HashMap<String, String>,
     global_var_names: HashMap<String, String>,
+    global_list_ids: HashMap<String, String>,
+    global_list_names: HashMap<String, String>,
 }
 
 impl<'a> ProjectBuilder<'a> {
@@ -99,6 +101,8 @@ impl<'a> ProjectBuilder<'a> {
             remote_calls: Vec::new(),
             global_var_ids: HashMap::new(),
             global_var_names: HashMap::new(),
+            global_list_ids: HashMap::new(),
+            global_list_names: HashMap::new(),
         }
     }
 
@@ -113,6 +117,7 @@ impl<'a> ProjectBuilder<'a> {
         if !ordered_targets.iter().any(|t| t.is_stage) {
             ordered_targets.insert(0, self.synthesized_stage_target(&ordered_targets));
         }
+        self.register_declared_stage_globals(&ordered_targets);
 
         let mut targets_json = Vec::new();
         let mut sprite_layer = 1;
@@ -172,8 +177,19 @@ impl<'a> ProjectBuilder<'a> {
         let mut lists_json: Map<String, Value> = Map::new();
 
         for var_decl in &target.variables {
-            let var_id = self.new_id("var");
-            local_variables_map.insert(var_decl.name.to_lowercase(), var_id.clone());
+            let key = var_decl.name.to_lowercase();
+            if local_variables_map.contains_key(&key) {
+                continue;
+            }
+            let var_id = if target.is_stage {
+                self.global_var_ids
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(|| self.new_id("var"))
+            } else {
+                self.new_id("var")
+            };
+            local_variables_map.insert(key, var_id.clone());
             variables_json.insert(var_id, json!([var_decl.name, 0]));
         }
         if target.is_stage {
@@ -186,14 +202,28 @@ impl<'a> ProjectBuilder<'a> {
             }
         }
         for list_decl in &target.lists {
-            let list_id = self.new_id("list");
-            lists_map.insert(list_decl.name.to_lowercase(), list_id.clone());
+            let key = list_decl.name.to_lowercase();
+            if lists_map.contains_key(&key) {
+                continue;
+            }
+            let list_id = if target.is_stage {
+                self.global_list_ids
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(|| self.new_id("list"))
+            } else {
+                self.new_id("list")
+            };
+            lists_map.insert(key, list_id.clone());
             lists_json.insert(list_id, json!([list_decl.name, []]));
         }
 
         let mut variables_map = local_variables_map.clone();
         for (k, v) in &self.global_var_ids {
             variables_map.insert(k.clone(), v.clone());
+        }
+        for (k, v) in &self.global_list_ids {
+            lists_map.insert(k.clone(), v.clone());
         }
 
         let signatures = self.build_procedure_signatures(target);
@@ -357,10 +387,13 @@ impl<'a> ProjectBuilder<'a> {
         for stmt in statements {
             match stmt {
                 Statement::ProcedureCall { name, args, .. } => {
+                    if local_procs.contains_key(&name.to_lowercase()) {
+                        continue;
+                    }
                     if let Some((target_name, proc_name)) = split_qualified(name) {
                         let key = format!("{}.{}", target_name.to_lowercase(), proc_name.to_lowercase());
                         let Some((_target_display, proc_display, expected_args)) = local_procs.get(&key) else {
-                            bail!("Unknown remote procedure '{}' during codegen scan.", name);
+                            continue;
                         };
                         if *expected_args != args.len() {
                             bail!(
@@ -435,6 +468,32 @@ impl<'a> ProjectBuilder<'a> {
                 let id = self.new_id("gvar");
                 self.global_var_ids.insert(key.clone(), id);
                 self.global_var_names.insert(key, var_name.clone());
+            }
+        }
+    }
+
+    fn register_declared_stage_globals(&mut self, ordered_targets: &[Target]) {
+        for target in ordered_targets {
+            if !target.is_stage {
+                continue;
+            }
+            for var_decl in &target.variables {
+                let key = var_decl.name.to_lowercase();
+                if self.global_var_ids.contains_key(&key) {
+                    continue;
+                }
+                let id = self.new_id("gvar");
+                self.global_var_ids.insert(key.clone(), id);
+                self.global_var_names.insert(key, var_decl.name.clone());
+            }
+            for list_decl in &target.lists {
+                let key = list_decl.name.to_lowercase();
+                if self.global_list_ids.contains_key(&key) {
+                    continue;
+                }
+                let id = self.new_id("glist");
+                self.global_list_ids.insert(key.clone(), id);
+                self.global_list_names.insert(key, list_decl.name.clone());
             }
         }
     }
@@ -1686,17 +1745,38 @@ impl<'a> ProjectBuilder<'a> {
         lists_map: &HashMap<String, String>,
         param_scope: &HashSet<String>,
     ) -> Result<EmittedStatement> {
-        if let Some((callee_target, callee_proc)) = split_qualified(name) {
-            return self.emit_remote_call_stmt(
-                blocks,
-                parent_id,
-                callee_target,
-                callee_proc,
-                args,
-                variables_map,
-                lists_map,
-                param_scope,
-            );
+        if !signatures.contains_key(&name.to_lowercase()) {
+            if let Some((callee_target, callee_proc)) = split_qualified(name) {
+                return self.emit_remote_call_stmt(
+                    blocks,
+                    parent_id,
+                    callee_target,
+                    callee_proc,
+                    args,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                );
+            }
+            if is_ignored_noop_call(name) {
+                let block_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "control_wait",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": { "DURATION": [1, [4, "0"]] },
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                return Ok(EmittedStatement {
+                    first: block_id.clone(),
+                    last: block_id,
+                });
+            }
         }
         let sig = signatures
             .get(&name.to_lowercase())
@@ -2048,13 +2128,13 @@ impl<'a> ProjectBuilder<'a> {
                 let block_id = self.new_block_id();
                 let opcode = if op == "round" {
                     "operator_round"
-                } else if op == "floor" {
+                } else if is_mathop_reporter(op) {
                     "operator_mathop"
                 } else {
                     bail!("Unsupported math reporter '{}'.", op);
                 };
-                let fields = if op == "floor" {
-                    json!({"OPERATOR": ["floor", Value::Null]})
+                let fields = if opcode == "operator_mathop" {
+                    json!({"OPERATOR": [op, Value::Null]})
                 } else {
                     json!({})
                 };
@@ -2076,6 +2156,39 @@ impl<'a> ProjectBuilder<'a> {
                 Ok(Some(block_id))
             }
             Expr::Var { name, .. } => {
+                let lowered = name.to_lowercase();
+                if param_scope.contains(&lowered) {
+                    let block_id = self.new_block_id();
+                    blocks.insert(
+                        block_id.clone(),
+                        json!({
+                            "opcode": "argument_reporter_string_number",
+                            "next": Value::Null,
+                            "parent": parent_id,
+                            "inputs": {},
+                            "fields": {"VALUE": [name, Value::Null]},
+                            "shadow": false,
+                            "topLevel": false
+                        }),
+                    );
+                    return Ok(Some(block_id));
+                }
+                if let Some(var_id) = variables_map.get(&lowered).cloned() {
+                    let block_id = self.new_block_id();
+                    blocks.insert(
+                        block_id.clone(),
+                        json!({
+                            "opcode": "data_variable",
+                            "next": Value::Null,
+                            "parent": parent_id,
+                            "inputs": {},
+                            "fields": {"VARIABLE": [name, var_id]},
+                            "shadow": false,
+                            "topLevel": false
+                        }),
+                    );
+                    return Ok(Some(block_id));
+                }
                 if let Some((remote_target, remote_var)) = split_qualified(name) {
                     let block_id = self.new_block_id();
                     let menu_id = self.new_block_id();
@@ -2100,23 +2213,6 @@ impl<'a> ProjectBuilder<'a> {
                             "inputs": {},
                             "fields": {"OBJECT": [remote_target, Value::Null]},
                             "shadow": true,
-                            "topLevel": false
-                        }),
-                    );
-                    return Ok(Some(block_id));
-                }
-                let lowered = name.to_lowercase();
-                if param_scope.contains(&lowered) {
-                    let block_id = self.new_block_id();
-                    blocks.insert(
-                        block_id.clone(),
-                        json!({
-                            "opcode": "argument_reporter_string_number",
-                            "next": Value::Null,
-                            "parent": parent_id,
-                            "inputs": {},
-                            "fields": {"VALUE": [name, Value::Null]},
-                            "shadow": false,
                             "topLevel": false
                         }),
                     );
@@ -2788,6 +2884,28 @@ fn format_num(v: f64) -> String {
         let s = format!("{:.6}", v);
         s.trim_end_matches('0').trim_end_matches('.').to_string()
     }
+}
+
+fn is_mathop_reporter(op: &str) -> bool {
+    matches!(
+        op,
+        "abs"
+            | "floor"
+            | "ceiling"
+            | "sqrt"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "ln"
+            | "log"
+    )
+}
+
+fn is_ignored_noop_call(name: &str) -> bool {
+    name.eq_ignore_ascii_case("log")
 }
 
 fn default_shadow(kind: &str) -> Value {
