@@ -177,6 +177,8 @@ next costume
 next backdrop
 ```
 
+`move (expr) steps` is also accepted.
+
 ### 7.4 Control flow
 
 ```sbtext
@@ -227,6 +229,30 @@ SpriteName.proc_name (arg1) (arg2)
 ```
 
 Cross-target calls use `SpriteName.proc_name`.
+
+### 7.8 Pen extension
+
+```sbtext
+pen down
+pen up
+erase all
+stamp
+
+set pen size to (expr)
+change pen size by (expr)
+
+set pen color to (expr)
+change pen color by (expr)
+
+set pen saturation to (expr)
+change pen saturation by (expr)
+
+set pen brightness to (expr)
+change pen brightness by (expr)
+
+set pen transparency to (expr)
+change pen transparency by (expr)
+```
 
 ## 8) Procedures
 

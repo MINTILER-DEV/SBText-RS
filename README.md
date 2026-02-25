@@ -11,6 +11,7 @@ Current state:
 - Can emit merged source via `--emit-merged`.
 - Uses native Rust backend for `.sb3` generation by default.
 - Can invoke the existing Python backend with `--python-backend` for parity checks.
+- Supports Pen extension blocks and auto-adds `"pen"` to `project.json` when used.
 
 ## Language docs
 
