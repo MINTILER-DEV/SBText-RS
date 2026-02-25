@@ -2675,10 +2675,11 @@ impl<'a> ProjectBuilder<'a> {
         }
 
         let mut out = Vec::new();
+        let mut used_names: HashSet<String> = HashSet::new();
         for (idx, costume) in costumes.iter().enumerate() {
             let mut rotation_center_x = 0.0;
             let mut rotation_center_y = 0.0;
-            let (mut data, ext, name) = if costume.path == "__default_stage_backdrop__.svg" {
+            let (mut data, ext, base_name) = if costume.path == "__default_stage_backdrop__.svg" {
                 (
                     DEFAULT_STAGE_SVG.as_bytes().to_vec(),
                     "svg".to_string(),
@@ -2735,6 +2736,7 @@ impl<'a> ProjectBuilder<'a> {
                     .to_string();
                 (data, ext, name)
             };
+            let name = uniquify_costume_name(&base_name, &mut used_names);
 
             if ext == "svg" {
                 match self.prepare_svg(&data, &costume.path) {
@@ -2779,9 +2781,13 @@ impl<'a> ProjectBuilder<'a> {
             let (prepared, cx, cy) = self.prepare_svg(fallback_svg, "__fallback_default__.svg")?;
             let digest = format!("{:x}", md5::compute(&prepared));
             let md5ext = format!("{}.svg", digest);
+            let fallback_name = uniquify_costume_name(
+                if target.is_stage { "backdrop1" } else { "costume1" },
+                &mut used_names,
+            );
             self.assets.insert(md5ext.clone(), prepared);
             out.push(json!({
-                "name": if target.is_stage { "backdrop1" } else { "costume1" },
+                "name": fallback_name,
                 "assetId": digest,
                 "md5ext": md5ext,
                 "dataFormat": "svg",
@@ -3113,4 +3119,16 @@ fn set_value_key(value: &mut Value, key: &str, entry: Value) -> Result<()> {
 fn is_nonpositive_viewbox_error(err: &anyhow::Error) -> bool {
     err.to_string()
         .contains("SVG viewBox must have positive width/height")
+}
+
+fn uniquify_costume_name(base: &str, used: &mut HashSet<String>) -> String {
+    let trimmed = base.trim();
+    let base_name = if trimmed.is_empty() { "costume" } else { trimmed };
+    let mut candidate = base_name.to_string();
+    let mut suffix = 2usize;
+    while !used.insert(candidate.to_lowercase()) {
+        candidate = format!("{} {}", base_name, suffix);
+        suffix += 1;
+    }
+    candidate
 }
