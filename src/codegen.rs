@@ -1203,6 +1203,7 @@ impl<'a> ProjectBuilder<'a> {
         param_scope: &HashSet<String>,
     ) -> Result<String> {
         let block_id = self.new_block_id();
+        let menu_id = self.new_block_id();
         let value_input = self.expr_input(
             blocks,
             value,
@@ -1218,9 +1219,21 @@ impl<'a> ProjectBuilder<'a> {
                 "opcode": opcode,
                 "next": Value::Null,
                 "parent": parent_id,
-                "inputs": {"VALUE": value_input},
-                "fields": {"COLOR_PARAM": [param, Value::Null]},
+                "inputs": {"COLOR_PARAM": [1, menu_id.clone()], "VALUE": value_input},
+                "fields": {},
                 "shadow": false,
+                "topLevel": false
+            }),
+        );
+        blocks.insert(
+            menu_id.clone(),
+            json!({
+                "opcode": "pen_menu_colorParam",
+                "next": Value::Null,
+                "parent": block_id.clone(),
+                "inputs": {},
+                "fields": {"colorParam": [param, Value::Null]},
+                "shadow": true,
                 "topLevel": false
             }),
         );
