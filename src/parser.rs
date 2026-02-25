@@ -133,7 +133,7 @@ impl Parser {
             self.advance();
             run_without_screen_refresh = true;
         }
-        let name = self.parse_name_token()?;
+        let name = self.parse_decl_name_token()?;
         let mut params = Vec::new();
         while self.check_type(TokenType::LParen) {
             self.consume_type(TokenType::LParen, "Expected '('.")?;
@@ -300,7 +300,10 @@ impl Parser {
         if self.check_keyword("replace") {
             return self.parse_replace_list_stmt();
         }
-        if self.check_type(TokenType::Ident) || self.check_type(TokenType::String) {
+        if self.check_type(TokenType::Ident)
+            || self.check_type(TokenType::String)
+            || self.check_type(TokenType::Number)
+        {
             return self.parse_call_stmt();
         }
         self.error_here("Unknown statement.")
@@ -546,8 +549,33 @@ impl Parser {
 
     fn parse_reset_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("reset", "Expected 'reset'.")?.pos;
-        self.consume_keyword("timer", "Expected 'timer' after 'reset'.")?;
-        Ok(Statement::ResetTimer { pos: start })
+        if self.match_keyword("timer") {
+            return Ok(Statement::ResetTimer { pos: start });
+        }
+
+        let mut name = "reset".to_string();
+        while !self.at_end() && !self.check_type(TokenType::Newline) && !self.check_type(TokenType::LParen) {
+            let part = self.current().clone();
+            if !matches!(
+                part.typ,
+                TokenType::Ident | TokenType::Keyword | TokenType::Number | TokenType::Op
+            ) {
+                break;
+            }
+            append_procedure_name_part(&mut name, &part.value);
+            self.advance();
+        }
+
+        let mut args = Vec::new();
+        while self.check_type(TokenType::LParen) {
+            args.push(self.parse_wrapped_expression()?);
+        }
+
+        Ok(Statement::ProcedureCall {
+            pos: start,
+            name,
+            args,
+        })
     }
 
     fn parse_pen_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -710,17 +738,30 @@ impl Parser {
 
     fn parse_call_stmt(&mut self) -> Result<Statement, ParseError> {
         let token = self.current().clone();
-        if token.typ != TokenType::Ident && token.typ != TokenType::String {
+        if token.typ != TokenType::Ident
+            && token.typ != TokenType::String
+            && token.typ != TokenType::Number
+        {
             return self.error_here("Expected procedure name.");
         }
-        self.advance();
-
-        let mut name = token.value.clone();
-        if token.typ != TokenType::String {
-            while self.check_type(TokenType::Ident) || self.check_type(TokenType::Keyword) {
-                let part = self.advance();
-                name.push(' ');
-                name.push_str(&part.value);
+        let mut name = String::new();
+        if token.typ == TokenType::String {
+            name = token.value.clone();
+            self.advance();
+        } else {
+            while !self.at_end() && !self.check_type(TokenType::Newline) && !self.check_type(TokenType::LParen) {
+                let part = self.current().clone();
+                if !matches!(
+                    part.typ,
+                    TokenType::Ident | TokenType::Keyword | TokenType::Number | TokenType::Op
+                ) {
+                    break;
+                }
+                append_procedure_name_part(&mut name, &part.value);
+                self.advance();
+            }
+            if name.is_empty() {
+                return self.error_here("Expected procedure name.");
             }
         }
 
@@ -736,7 +777,14 @@ impl Parser {
     }
 
     fn parse_wrapped_expression(&mut self) -> Result<Expr, ParseError> {
-        self.consume_type(TokenType::LParen, "Expected '('.")?;
+        let start = self.consume_type(TokenType::LParen, "Expected '('.")?.pos;
+        if self.check_type(TokenType::RParen) {
+            self.advance();
+            return Ok(Expr::Number {
+                pos: start,
+                value: 0.0,
+            });
+        }
         let expr = self.parse_expression(&[TokenType::RParen], 1)?;
         self.consume_type(TokenType::RParen, "Expected ')' after expression.")?;
         Ok(expr)
@@ -829,6 +877,18 @@ impl Parser {
         if self.check_keyword("round") {
             return self.parse_math_func_expr("round");
         }
+        if (token.typ == TokenType::Ident || token.typ == TokenType::Keyword)
+            && token.value.eq_ignore_ascii_case("abs")
+            && self.peek().typ == TokenType::LParen
+        {
+            let start = self.advance().pos;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Expr::MathFunc {
+                pos: start,
+                op: "abs".to_string(),
+                value: Box::new(value),
+            });
+        }
         if self.check_keyword("answer") {
             let start = self.consume_keyword("answer", "Expected 'answer'.")?.pos;
             return Ok(Expr::BuiltinReporter {
@@ -861,7 +921,7 @@ impl Parser {
         }
         if token.typ == TokenType::Number {
             self.advance();
-            let value = token.value.parse::<f64>().unwrap_or(0.0);
+            let value = parse_number_literal(&token.value).unwrap_or(0.0);
             return Ok(Expr::Number {
                 pos: token.pos,
                 value,
@@ -896,6 +956,13 @@ impl Parser {
         }
         if token.typ == TokenType::LParen {
             self.advance();
+            if self.check_type(TokenType::RParen) {
+                self.advance();
+                return Ok(Expr::Number {
+                    pos: token.pos,
+                    value: 0.0,
+                });
+            }
             let expr = self.parse_expression(&[TokenType::RParen], 1)?;
             self.consume_type(TokenType::RParen, "Expected ')' after grouped expression.")?;
             return Ok(expr);
@@ -1272,4 +1339,42 @@ fn precedence_of(op: &str) -> Option<i32> {
 
 fn is_pen_color_param(name: &str) -> bool {
     matches!(name, "color" | "saturation" | "brightness" | "transparency")
+}
+
+fn append_procedure_name_part(name: &mut String, part: &str) {
+    if name.is_empty() {
+        name.push_str(part);
+        return;
+    }
+    let prev = name.chars().last().unwrap_or(' ');
+    let next = part.chars().next().unwrap_or(' ');
+    let prev_word = prev.is_ascii_alphanumeric() || prev == '_' || prev == '?';
+    let next_word = next.is_ascii_alphanumeric() || next == '_' || next == '?';
+    if prev_word && next_word {
+        name.push(' ');
+    }
+    name.push_str(part);
+}
+
+fn parse_number_literal(raw: &str) -> Option<f64> {
+    let normalized = raw.replace('_', "");
+    if let Some(hex) = normalized
+        .strip_prefix("0x")
+        .or_else(|| normalized.strip_prefix("0X"))
+    {
+        return u128::from_str_radix(hex, 16).ok().map(|v| v as f64);
+    }
+    if let Some(bin) = normalized
+        .strip_prefix("0b")
+        .or_else(|| normalized.strip_prefix("0B"))
+    {
+        return u128::from_str_radix(bin, 2).ok().map(|v| v as f64);
+    }
+    if let Some(oct) = normalized
+        .strip_prefix("0o")
+        .or_else(|| normalized.strip_prefix("0O"))
+    {
+        return u128::from_str_radix(oct, 8).ok().map(|v| v as f64);
+    }
+    normalized.parse::<f64>().ok()
 }

@@ -220,6 +220,33 @@ impl<'a> Lexer<'a> {
         let pos = self.pos();
         let mut text = String::new();
         text.push(self.advance());
+
+        if text == "0" && !self.at_end() {
+            let radix_prefix = self.peek();
+            if matches!(radix_prefix, 'x' | 'X' | 'b' | 'B' | 'o' | 'O') {
+                text.push(self.advance());
+                while !self.at_end() {
+                    let ch = self.peek();
+                    let is_valid = match radix_prefix {
+                        'x' | 'X' => ch.is_ascii_hexdigit(),
+                        'b' | 'B' => matches!(ch, '0' | '1'),
+                        'o' | 'O' => matches!(ch, '0'..='7'),
+                        _ => false,
+                    };
+                    if is_valid || ch == '_' {
+                        text.push(self.advance());
+                    } else {
+                        break;
+                    }
+                }
+                return Token {
+                    typ: TokenType::Number,
+                    value: text,
+                    pos,
+                };
+            }
+        }
+
         let mut seen_dot = false;
         while !self.at_end() {
             let ch = self.peek();
