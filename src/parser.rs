@@ -300,7 +300,7 @@ impl Parser {
         if self.check_keyword("replace") {
             return self.parse_replace_list_stmt();
         }
-        if self.check_type(TokenType::Ident) {
+        if self.check_type(TokenType::Ident) || self.check_type(TokenType::String) {
             return self.parse_call_stmt();
         }
         self.error_here("Unknown statement.")
@@ -709,14 +709,28 @@ impl Parser {
     }
 
     fn parse_call_stmt(&mut self) -> Result<Statement, ParseError> {
-        let token = self.consume_type(TokenType::Ident, "Expected procedure name.")?;
+        let token = self.current().clone();
+        if token.typ != TokenType::Ident && token.typ != TokenType::String {
+            return self.error_here("Expected procedure name.");
+        }
+        self.advance();
+
+        let mut name = token.value.clone();
+        if token.typ != TokenType::String {
+            while self.check_type(TokenType::Ident) || self.check_type(TokenType::Keyword) {
+                let part = self.advance();
+                name.push(' ');
+                name.push_str(&part.value);
+            }
+        }
+
         let mut args = Vec::new();
         while self.check_type(TokenType::LParen) {
             args.push(self.parse_wrapped_expression()?);
         }
         Ok(Statement::ProcedureCall {
             pos: token.pos,
-            name: token.value,
+            name,
             args,
         })
     }
