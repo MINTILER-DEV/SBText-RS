@@ -36,6 +36,8 @@ sbtext-rs INPUT OUTPUT
 sbtext-rs INPUT OUTPUT --no-svg-scale
 sbtext-rs INPUT OUTPUT --python-backend
 sbtext-rs INPUT --emit-merged merged.sbtext
+sbtext-rs INPUT.sb3 --decompile
+sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
 ```
 
 ## Native + Library
@@ -48,3 +50,12 @@ sbtext-rs INPUT --emit-merged merged.sbtext
 - WASM exports (feature-gated) are in `src/wasm.rs`:
   - `compile_source_to_sb3(...)`
   - `compile_source_to_sb3_with_options(...)`
+
+## SB3 Decompile
+
+- `--decompile` converts `.sb3` to `.sbtext`.
+- Without `--split-sprites`, output is a single `.sbtext` file (default: same name as input).
+- With `--split-sprites`, output is a directory:
+  - `main.sbtext` contains the stage block and `import` lines.
+  - each sprite is written as its own `.sbtext` file.
+  - costume assets referenced by `md5ext` are extracted beside the output files.
