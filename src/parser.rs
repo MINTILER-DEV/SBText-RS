@@ -128,6 +128,11 @@ impl Parser {
     }
 
     fn parse_procedure(&mut self, pos: Position) -> Result<Procedure, ParseError> {
+        let mut run_without_screen_refresh = false;
+        if self.check_type(TokenType::Op) && self.current().value == "!" {
+            self.advance();
+            run_without_screen_refresh = true;
+        }
         let name = self.parse_name_token()?;
         let mut params = Vec::new();
         while self.check_type(TokenType::LParen) {
@@ -139,7 +144,7 @@ impl Parser {
             self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
             params.push(param);
         }
-        let run_without_screen_refresh = self.try_parse_run_without_screen_refresh();
+        run_without_screen_refresh = run_without_screen_refresh || self.try_parse_run_without_screen_refresh();
         self.skip_newlines();
         let body = self.parse_statement_block(&["end"], false)?;
         self.consume_keyword("end", "Expected 'end' to close procedure definition.")?;
