@@ -408,3 +408,7 @@ This guarantees wait-until-finished semantics for cross-target calls.
 - `wait until` and `repeat until` conditions are read until newline.
 - `stop (expr)` uses literal text for stop option; non-literal expressions default to `"all"` in codegen.
 - Procedure names declared as quoted strings are parsed, but call syntax expects identifier-style names; stick to identifier procedure names.
+
+## EXTRA INFORMATION
+
+- Scratch operates in 30fps. Adding a 0.0333 wait in a forever loop makes it slower than 30fps.
