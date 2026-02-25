@@ -322,12 +322,22 @@ fn decompile_statement(
         "data_setvariableto" => {
             let name = field_first_string(block, "VARIABLE").unwrap_or_else(|| "var".to_string());
             let value = expr_from_input(blocks, block, "VALUE")?;
-            out.push(format!("{}set [{}] to ({})", pad, name, value));
+            out.push(format!(
+                "{}set [{}] to ({})",
+                pad,
+                format_bracket_name(&name),
+                value
+            ));
         }
         "data_changevariableby" => {
             let name = field_first_string(block, "VARIABLE").unwrap_or_else(|| "var".to_string());
             let value = expr_from_input(blocks, block, "VALUE")?;
-            out.push(format!("{}change [{}] by ({})", pad, name, value));
+            out.push(format!(
+                "{}change [{}] by ({})",
+                pad,
+                format_bracket_name(&name),
+                value
+            ));
         }
         "motion_movesteps" => {
             let steps = expr_from_input(blocks, block, "STEPS")?;
@@ -456,16 +466,26 @@ fn decompile_statement(
         "data_addtolist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             let item = expr_from_input(blocks, block, "ITEM")?;
-            out.push(format!("{}add ({}) to [{}]", pad, item, list));
+            out.push(format!(
+                "{}add ({}) to [{}]",
+                pad,
+                item,
+                format_bracket_name(&list)
+            ));
         }
         "data_deleteoflist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             let idx = expr_from_input(blocks, block, "INDEX")?;
-            out.push(format!("{}delete ({}) of [{}]", pad, idx, list));
+            out.push(format!(
+                "{}delete ({}) of [{}]",
+                pad,
+                idx,
+                format_bracket_name(&list)
+            ));
         }
         "data_deletealloflist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
-            out.push(format!("{}delete all of [{}]", pad, list));
+            out.push(format!("{}delete all of [{}]", pad, format_bracket_name(&list)));
         }
         "data_insertatlist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
@@ -473,7 +493,10 @@ fn decompile_statement(
             let idx = expr_from_input(blocks, block, "INDEX")?;
             out.push(format!(
                 "{}insert ({}) at ({}) of [{}]",
-                pad, item, idx, list
+                pad,
+                item,
+                idx,
+                format_bracket_name(&list)
             ));
         }
         "data_replaceitemoflist" => {
@@ -482,7 +505,10 @@ fn decompile_statement(
             let idx = expr_from_input(blocks, block, "INDEX")?;
             out.push(format!(
                 "{}replace item ({}) of [{}] with ({})",
-                pad, idx, list, item
+                pad,
+                idx,
+                format_bracket_name(&list),
+                item
             ));
         }
         "procedures_call" => {
@@ -602,16 +628,16 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
         "data_itemoflist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             let idx = expr_from_input(blocks, block, "INDEX")?;
-            format!("item ({}) of [{}]", idx, list)
+            format!("item ({}) of [{}]", idx, format_bracket_name(&list))
         }
         "data_lengthoflist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
-            format!("length of [{}]", list)
+            format!("length of [{}]", format_bracket_name(&list))
         }
         "data_listcontainsitem" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             let item = expr_from_input(blocks, block, "ITEM")?;
-            format!("[{}] contains ({})", list, item)
+            format!("[{}] contains ({})", format_bracket_name(&list), item)
         }
         "sensing_keypressed" => {
             let key = key_option(blocks, block).unwrap_or_else(|| "space".to_string());
@@ -746,7 +772,15 @@ fn format_var_ref(name: String) -> String {
     if is_simple_identifier_or_qualified(&name) {
         name
     } else {
-        format!("[{}]", name)
+        format!("[{}]", format_bracket_name(&name))
+    }
+}
+
+fn format_bracket_name(name: &str) -> String {
+    if is_simple_identifier_or_qualified(name) {
+        name.to_string()
+    } else {
+        quote_str(name)
     }
 }
 
