@@ -264,12 +264,21 @@ define procName (param1) (param2)
 end
 ```
 
+Run-without-screen-refresh definition:
+
+```sbtext
+define procName (param1) (param2) run without screen refresh
+  ...
+end
+```
+
 Rules:
 
 - Local procedure calls are validated for existence and argument count.
 - Local procedure calls before the definition line are compile errors.
 - Duplicate procedure names in the same target are compile errors.
 - Duplicate parameter names are compile errors.
+- `run without screen refresh` maps to Scratch custom block warp mode.
 
 ## 9) Expressions
 
