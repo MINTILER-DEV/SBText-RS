@@ -264,6 +264,14 @@ define procName (param1) (param2)
 end
 ```
 
+Shorthand warp definition:
+
+```sbtext
+define !procName (param1) (param2)
+  ...
+end
+```
+
 Run-without-screen-refresh definition:
 
 ```sbtext
@@ -279,6 +287,7 @@ Rules:
 - Duplicate procedure names in the same target are compile errors.
 - Duplicate parameter names are compile errors.
 - `run without screen refresh` maps to Scratch custom block warp mode.
+- `define !name (...)` is shorthand for warp mode.
 
 ## 9) Expressions
 
