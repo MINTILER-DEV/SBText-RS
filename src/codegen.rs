@@ -120,10 +120,11 @@ impl<'a> ProjectBuilder<'a> {
             targets_json.push(self.build_target_json(target, layer)?);
         }
 
+        let extensions = self.collect_extensions();
         let project_json = json!({
             "targets": targets_json,
             "monitors": [],
-            "extensions": [],
+            "extensions": extensions,
             "meta": {
                 "semver": "3.0.0",
                 "vm": "0.2.0",
@@ -297,6 +298,19 @@ impl<'a> ProjectBuilder<'a> {
             );
         }
         signatures
+    }
+
+    fn collect_extensions(&self) -> Vec<String> {
+        let mut extensions = Vec::new();
+        if self
+            .project
+            .targets
+            .iter()
+            .any(|target| target_uses_pen_extension(target))
+        {
+            extensions.push("pen".to_string());
+        }
+        extensions
     }
 
     fn collect_remote_call_specs(&self) -> Result<Vec<RemoteCallSpec>> {
@@ -908,6 +922,52 @@ impl<'a> ProjectBuilder<'a> {
                 param_scope,
                 "number",
             )?)),
+            Statement::PenDown { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_penDown")?)),
+            Statement::PenUp { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_penUp")?)),
+            Statement::PenClear { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_clear")?)),
+            Statement::PenStamp { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_stamp")?)),
+            Statement::ChangePenSizeBy { value, .. } => Ok(single(self.emit_single_input_stmt(
+                blocks,
+                parent_id,
+                "pen_changePenSizeBy",
+                "SIZE",
+                value,
+                variables_map,
+                lists_map,
+                param_scope,
+                "number",
+            )?)),
+            Statement::SetPenSizeTo { value, .. } => Ok(single(self.emit_single_input_stmt(
+                blocks,
+                parent_id,
+                "pen_setPenSizeTo",
+                "SIZE",
+                value,
+                variables_map,
+                lists_map,
+                param_scope,
+                "number",
+            )?)),
+            Statement::ChangePenColorParamBy { param, value, .. } => Ok(single(self.emit_pen_color_param_stmt(
+                blocks,
+                parent_id,
+                "pen_changePenColorParamBy",
+                param,
+                value,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::SetPenColorParamTo { param, value, .. } => Ok(single(self.emit_pen_color_param_stmt(
+                blocks,
+                parent_id,
+                "pen_setPenColorParamTo",
+                param,
+                value,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
             Statement::Show { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_show")?)),
             Statement::Hide { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_hide")?)),
             Statement::NextCostume { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextcostume")?)),
@@ -1116,6 +1176,42 @@ impl<'a> ProjectBuilder<'a> {
                 "parent": parent_id,
                 "inputs": { input_name: input },
                 "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_pen_color_param_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        opcode: &str,
+        param: &str,
+        value: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let value_input = self.expr_input(
+            blocks,
+            value,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": opcode,
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"VALUE": value_input},
+                "fields": {"COLOR_PARAM": [param, Value::Null]},
                 "shadow": false,
                 "topLevel": false
             }),
@@ -2605,6 +2701,50 @@ fn collect_messages_from_statements(statements: &[Statement], out: &mut HashSet<
             _ => {}
         }
     }
+}
+
+fn target_uses_pen_extension(target: &Target) -> bool {
+    target
+        .scripts
+        .iter()
+        .any(|script| statements_use_pen_extension(&script.body))
+        || target
+            .procedures
+            .iter()
+            .any(|procedure| statements_use_pen_extension(&procedure.body))
+}
+
+fn statements_use_pen_extension(statements: &[Statement]) -> bool {
+    for stmt in statements {
+        match stmt {
+            Statement::PenDown { .. }
+            | Statement::PenUp { .. }
+            | Statement::PenClear { .. }
+            | Statement::PenStamp { .. }
+            | Statement::ChangePenSizeBy { .. }
+            | Statement::SetPenSizeTo { .. }
+            | Statement::ChangePenColorParamBy { .. }
+            | Statement::SetPenColorParamTo { .. } => return true,
+            Statement::Repeat { body, .. }
+            | Statement::RepeatUntil { body, .. }
+            | Statement::Forever { body, .. } => {
+                if statements_use_pen_extension(body) {
+                    return true;
+                }
+            }
+            Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if statements_use_pen_extension(then_body) || statements_use_pen_extension(else_body) {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 fn merge_object(dst: &mut Value, add: Value) -> Result<()> {

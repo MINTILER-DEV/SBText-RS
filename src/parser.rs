@@ -252,6 +252,15 @@ impl Parser {
         if self.check_keyword("reset") {
             return self.parse_reset_stmt();
         }
+        if self.check_keyword("pen") {
+            return self.parse_pen_stmt();
+        }
+        if self.check_keyword("erase") {
+            return self.parse_erase_stmt();
+        }
+        if self.check_keyword("stamp") {
+            return self.parse_stamp_stmt();
+        }
         if self.check_keyword("add") {
             return self.parse_add_to_list_stmt();
         }
@@ -305,6 +314,9 @@ impl Parser {
             let value = self.parse_wrapped_expression()?;
             return Ok(Statement::SetSizeTo { pos: start, value });
         }
+        if self.match_keyword("pen") {
+            return self.parse_set_pen_stmt(start);
+        }
         let var_name = self.parse_variable_field_name()?;
         self.consume_keyword("to", "Expected 'to' in set statement.")?;
         let value = self.parse_wrapped_expression()?;
@@ -328,6 +340,9 @@ impl Parser {
             let value = self.parse_wrapped_expression()?;
             return Ok(Statement::ChangeSizeBy { pos: start, value });
         }
+        if self.match_keyword("pen") {
+            return self.parse_change_pen_stmt(start);
+        }
         let var_name = self.parse_variable_field_name()?;
         self.consume_keyword("by", "Expected 'by' in change statement.")?;
         let delta = self.parse_wrapped_expression()?;
@@ -337,7 +352,12 @@ impl Parser {
     fn parse_move_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("move", "Expected 'move'.")?.pos;
         let steps = self.parse_wrapped_expression()?;
-        self.match_keyword("steps");
+        if !self.match_keyword("steps") && self.check_type(TokenType::LBracket) {
+            let unit = self.parse_bracket_text()?;
+            if !unit.eq_ignore_ascii_case("steps") {
+                return self.error_here("Expected 'steps' or '[steps]' after move amount.");
+            }
+        }
         Ok(Statement::Move { pos: start, steps })
     }
 
@@ -501,6 +521,71 @@ impl Parser {
         let start = self.consume_keyword("reset", "Expected 'reset'.")?.pos;
         self.consume_keyword("timer", "Expected 'timer' after 'reset'.")?;
         Ok(Statement::ResetTimer { pos: start })
+    }
+
+    fn parse_pen_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("pen", "Expected 'pen'.")?.pos;
+        if self.match_keyword("down") {
+            return Ok(Statement::PenDown { pos: start });
+        }
+        if self.match_keyword("up") {
+            return Ok(Statement::PenUp { pos: start });
+        }
+        self.error_here("Expected 'down' or 'up' after 'pen'.")
+    }
+
+    fn parse_erase_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("erase", "Expected 'erase'.")?.pos;
+        self.consume_keyword("all", "Expected 'all' after 'erase'.")?;
+        Ok(Statement::PenClear { pos: start })
+    }
+
+    fn parse_stamp_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("stamp", "Expected 'stamp'.")?.pos;
+        Ok(Statement::PenStamp { pos: start })
+    }
+
+    fn parse_set_pen_stmt(&mut self, start: Position) -> Result<Statement, ParseError> {
+        let param = self.parse_pen_param_name()?;
+        if param == "size" {
+            self.consume_keyword("to", "Expected 'to' in 'set pen size to'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::SetPenSizeTo { pos: start, value });
+        }
+        if is_pen_color_param(param.as_str()) {
+            self.consume_keyword("to", "Expected 'to' in 'set pen <param> to'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::SetPenColorParamTo { pos: start, param, value });
+        }
+        self.error_here("Unknown pen parameter. Use size/color/saturation/brightness/transparency.")
+    }
+
+    fn parse_change_pen_stmt(&mut self, start: Position) -> Result<Statement, ParseError> {
+        let param = self.parse_pen_param_name()?;
+        if param == "size" {
+            self.consume_keyword("by", "Expected 'by' in 'change pen size by'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::ChangePenSizeBy { pos: start, value });
+        }
+        if is_pen_color_param(param.as_str()) {
+            self.consume_keyword("by", "Expected 'by' in 'change pen <param> by'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::ChangePenColorParamBy { pos: start, param, value });
+        }
+        self.error_here("Unknown pen parameter. Use size/color/saturation/brightness/transparency.")
+    }
+
+    fn parse_pen_param_name(&mut self) -> Result<String, ParseError> {
+        let token = self.current().clone();
+        if token.typ == TokenType::Keyword {
+            self.advance();
+            return Ok(token.value);
+        }
+        if token.typ == TokenType::Ident {
+            self.advance();
+            return Ok(token.value.to_lowercase());
+        }
+        self.error_here("Expected pen parameter name.")
     }
 
     fn parse_add_to_list_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -1142,4 +1227,8 @@ fn precedence_of(op: &str) -> Option<i32> {
         "*" | "/" | "%" => Some(5),
         _ => None,
     }
+}
+
+fn is_pen_color_param(name: &str) -> bool {
+    matches!(name, "color" | "saturation" | "brightness" | "transparency")
 }

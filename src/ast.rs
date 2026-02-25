@@ -204,6 +204,36 @@ pub enum Statement {
         pos: Position,
         value: Expr,
     },
+    PenDown {
+        pos: Position,
+    },
+    PenUp {
+        pos: Position,
+    },
+    PenClear {
+        pos: Position,
+    },
+    PenStamp {
+        pos: Position,
+    },
+    ChangePenSizeBy {
+        pos: Position,
+        value: Expr,
+    },
+    SetPenSizeTo {
+        pos: Position,
+        value: Expr,
+    },
+    ChangePenColorParamBy {
+        pos: Position,
+        param: String,
+        value: Expr,
+    },
+    SetPenColorParamTo {
+        pos: Position,
+        param: String,
+        value: Expr,
+    },
     Show {
         pos: Position,
     },
@@ -284,6 +314,14 @@ impl Statement {
             | Statement::IfOnEdgeBounce { pos, .. }
             | Statement::ChangeSizeBy { pos, .. }
             | Statement::SetSizeTo { pos, .. }
+            | Statement::PenDown { pos, .. }
+            | Statement::PenUp { pos, .. }
+            | Statement::PenClear { pos, .. }
+            | Statement::PenStamp { pos, .. }
+            | Statement::ChangePenSizeBy { pos, .. }
+            | Statement::SetPenSizeTo { pos, .. }
+            | Statement::ChangePenColorParamBy { pos, .. }
+            | Statement::SetPenColorParamTo { pos, .. }
             | Statement::Show { pos, .. }
             | Statement::Hide { pos, .. }
             | Statement::NextCostume { pos, .. }

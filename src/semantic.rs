@@ -393,13 +393,21 @@ fn analyze_statements(
             | Statement::ChangeYBy { value, .. }
             | Statement::SetY { value, .. }
             | Statement::ChangeSizeBy { value, .. }
-            | Statement::SetSizeTo { value, .. } => {
+            | Statement::SetSizeTo { value, .. }
+            | Statement::ChangePenSizeBy { value, .. }
+            | Statement::SetPenSizeTo { value, .. }
+            | Statement::ChangePenColorParamBy { value, .. }
+            | Statement::SetPenColorParamTo { value, .. } => {
                 analyze_expr(target, value, variables, lists, target_infos, param_scope)?
             }
             Statement::PointInDirection { direction, .. } => {
                 analyze_expr(target, direction, variables, lists, target_infos, param_scope)?
             }
             Statement::IfOnEdgeBounce { .. }
+            | Statement::PenDown { .. }
+            | Statement::PenUp { .. }
+            | Statement::PenClear { .. }
+            | Statement::PenStamp { .. }
             | Statement::Show { .. }
             | Statement::Hide { .. }
             | Statement::NextCostume { .. }
