@@ -3,6 +3,9 @@ name = "sbtext-rs"
 version = "1.0.0"
 edition = "2021"
 
+[lib]
+crate-type = ["rlib"]
+
 [dependencies]
 anyhow = "1"
 clap = { version = "4.5", features = ["derive"] }

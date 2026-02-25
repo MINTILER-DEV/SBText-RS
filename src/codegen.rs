@@ -27,13 +27,19 @@ impl Default for CodegenOptions {
 }
 
 pub fn write_sb3(project: &Project, source_dir: &Path, output_path: &Path, options: CodegenOptions) -> Result<()> {
-    let mut builder = ProjectBuilder::new(project, source_dir, options);
-    let (project_json, assets) = builder.build()?;
+    let bytes = build_sb3_bytes(project, source_dir, options)?;
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let file = fs::File::create(output_path)?;
-    let mut zip = zip::ZipWriter::new(file);
+    fs::write(output_path, bytes)?;
+    Ok(())
+}
+
+pub fn build_sb3_bytes(project: &Project, source_dir: &Path, options: CodegenOptions) -> Result<Vec<u8>> {
+    let mut builder = ProjectBuilder::new(project, source_dir, options);
+    let (project_json, assets) = builder.build()?;
+    let mut buffer = Cursor::new(Vec::<u8>::new());
+    let mut zip = zip::ZipWriter::new(&mut buffer);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     zip.start_file("project.json", opts)?;
     let project_bytes = serde_json::to_vec_pretty(&project_json)?;
@@ -43,7 +49,7 @@ pub fn write_sb3(project: &Project, source_dir: &Path, output_path: &Path, optio
         zip.write_all(&bytes)?;
     }
     zip.finish()?;
-    Ok(())
+    Ok(buffer.into_inner())
 }
 
 #[derive(Debug, Clone)]
