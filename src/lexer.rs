@@ -69,7 +69,7 @@ impl<'a> Lexer<'a> {
         let mut tokens = Vec::new();
         while !self.at_end() {
             let ch = self.peek();
-            if ch == '\u{feff}' {
+            if is_ignorable_format_char(ch) {
                 self.advance();
                 continue;
             }
@@ -407,4 +407,15 @@ fn keyword_set() -> HashSet<&'static str> {
     ]
     .into_iter()
     .collect()
+}
+
+fn is_ignorable_format_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{feff}' // BOM / zero width no-break space
+            | '\u{200b}' // zero width space
+            | '\u{200c}' // zero width non-joiner
+            | '\u{200d}' // zero width joiner
+            | '\u{2060}' // word joiner
+    )
 }
