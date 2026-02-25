@@ -1,10 +1,12 @@
 pub mod ast;
-pub mod cli;
 pub mod codegen;
 pub mod imports;
 pub mod lexer;
 pub mod parser;
 pub mod semantic;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cli;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod python_backend;
@@ -17,6 +19,10 @@ use parser::Parser as SbParser;
 use semantic::analyze as semantic_analyze;
 use std::path::{Path, PathBuf};
 
+#[cfg(all(target_arch = "wasm32", feature = "wasm-bindings"))]
+pub mod wasm;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn run_cli(args: &cli::Args) -> Result<()> {
     let input = canonicalize_file(&args.input)?;
     let merged = resolve_merged_source_with_map(&input)?;
@@ -28,14 +34,7 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
 
     if let Some(output) = &args.output {
         if args.python_backend {
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                python_backend::compile_with_python(&input, &merged.source, output, args.no_svg_scale)?;
-            }
-            #[cfg(target_arch = "wasm32")]
-            {
-                anyhow::bail!("--python-backend is not available on wasm targets.");
-            }
+            python_backend::compile_with_python(&input, &merged.source, output, args.no_svg_scale)?;
         } else {
             let options = CodegenOptions {
                 scale_svgs: !args.no_svg_scale,
