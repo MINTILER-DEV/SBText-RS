@@ -23,6 +23,12 @@ Current state:
 cargo build --release
 ```
 
+WASM library build (bindings enabled):
+
+```bash
+cargo build --target wasm32-unknown-unknown --features wasm-bindings --lib
+```
+
 ## Usage
 
 ```bash
@@ -39,3 +45,6 @@ sbtext-rs INPUT --emit-merged merged.sbtext
   - `run_cli(...)`
   - `compile_entry_to_sb3_bytes(...)`
   - `compile_source_to_sb3_bytes(...)`
+- WASM exports (feature-gated) are in `src/wasm.rs`:
+  - `compile_source_to_sb3(...)`
+  - `compile_source_to_sb3_with_options(...)`
