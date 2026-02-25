@@ -11,6 +11,7 @@ Current state:
 - Can emit merged source via `--emit-merged`.
 - Uses native Rust backend for `.sb3` generation by default.
 - Supports Pen extension blocks and auto-adds `"pen"` to `project.json` when used.
+- Keeps native CLI support and now also exposes a reusable Rust library API.
 
 ## Language docs
 
@@ -30,3 +31,11 @@ sbtext-rs INPUT OUTPUT --no-svg-scale
 sbtext-rs INPUT OUTPUT --python-backend
 sbtext-rs INPUT --emit-merged merged.sbtext
 ```
+
+## Native + Library
+
+- Native CLI remains the default workflow.
+- Core compile logic is available from `src/lib.rs`, including:
+  - `run_cli(...)`
+  - `compile_entry_to_sb3_bytes(...)`
+  - `compile_source_to_sb3_bytes(...)`
