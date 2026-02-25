@@ -357,6 +357,7 @@ pub struct Procedure {
     pub pos: Position,
     pub name: String,
     pub params: Vec<String>,
+    pub run_without_screen_refresh: bool,
     pub body: Vec<Statement>,
 }
 

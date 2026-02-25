@@ -139,10 +139,32 @@ impl Parser {
             self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
             params.push(param);
         }
+        let run_without_screen_refresh = self.try_parse_run_without_screen_refresh();
         self.skip_newlines();
         let body = self.parse_statement_block(&["end"], false)?;
         self.consume_keyword("end", "Expected 'end' to close procedure definition.")?;
-        Ok(Procedure { pos, name, params, body })
+        Ok(Procedure {
+            pos,
+            name,
+            params,
+            run_without_screen_refresh,
+            body,
+        })
+    }
+
+    fn try_parse_run_without_screen_refresh(&mut self) -> bool {
+        if self.word_at_offset(0).as_deref() != Some("run")
+            || self.word_at_offset(1).as_deref() != Some("without")
+            || self.word_at_offset(2).as_deref() != Some("screen")
+            || self.word_at_offset(3).as_deref() != Some("refresh")
+        {
+            return false;
+        }
+        self.advance();
+        self.advance();
+        self.advance();
+        self.advance();
+        true
     }
 
     fn parse_event_script(&mut self, pos: Position) -> Result<EventScript, ParseError> {

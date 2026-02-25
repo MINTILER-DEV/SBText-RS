@@ -51,6 +51,7 @@ struct ProcedureSignature {
     params: Vec<String>,
     arg_ids: Vec<String>,
     proccode: String,
+    warp: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -294,6 +295,7 @@ impl<'a> ProjectBuilder<'a> {
                     params: procedure.params.clone(),
                     arg_ids,
                     proccode,
+                    warp: procedure.run_without_screen_refresh,
                 },
             );
         }
@@ -610,16 +612,16 @@ impl<'a> ProjectBuilder<'a> {
                 "fields": {},
                 "shadow": true,
                 "topLevel": false,
-                "mutation": {
-                    "tagName": "mutation",
-                    "children": [],
-                    "proccode": signature.proccode,
-                    "argumentids": serde_json::to_string(&signature.arg_ids)?,
-                    "argumentnames": serde_json::to_string(&signature.params)?,
-                    "argumentdefaults": serde_json::to_string(&vec![""; signature.params.len()])?,
-                    "warp": "false"
-                }
-            }),
+                    "mutation": {
+                        "tagName": "mutation",
+                        "children": [],
+                        "proccode": signature.proccode,
+                        "argumentids": serde_json::to_string(&signature.arg_ids)?,
+                        "argumentnames": serde_json::to_string(&signature.params)?,
+                        "argumentdefaults": serde_json::to_string(&vec![""; signature.params.len()])?,
+                        "warp": if signature.warp { "true" } else { "false" }
+                    }
+                }),
         );
         let (first, last) = self.emit_statement_chain(
             blocks,
@@ -1709,7 +1711,7 @@ impl<'a> ProjectBuilder<'a> {
                     "children": [],
                     "proccode": sig.proccode,
                     "argumentids": serde_json::to_string(&sig.arg_ids)?,
-                    "warp": "false"
+                    "warp": if sig.warp { "true" } else { "false" }
                 }
             }),
         );
