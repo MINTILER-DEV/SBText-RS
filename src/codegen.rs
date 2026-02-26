@@ -1041,6 +1041,28 @@ impl<'a> ProjectBuilder<'a> {
             Statement::Hide { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_hide")?)),
             Statement::NextCostume { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextcostume")?)),
             Statement::NextBackdrop { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextbackdrop")?)),
+            Statement::SwitchCostumeTo { costume, .. } => Ok(single(self.emit_single_input_stmt(
+                blocks,
+                parent_id,
+                "looks_switchcostumeto",
+                "COSTUME",
+                costume,
+                variables_map,
+                lists_map,
+                param_scope,
+                "string",
+            )?)),
+            Statement::SwitchBackdropTo { backdrop, .. } => Ok(single(self.emit_single_input_stmt(
+                blocks,
+                parent_id,
+                "looks_switchbackdropto",
+                "BACKDROP",
+                backdrop,
+                variables_map,
+                lists_map,
+                param_scope,
+                "string",
+            )?)),
             Statement::Wait { duration, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
@@ -2399,6 +2421,23 @@ impl<'a> ProjectBuilder<'a> {
                     block_id.clone(),
                     json!({
                         "opcode": "data_lengthoflist",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {},
+                        "fields": {"LIST": [list_name, list_id]},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                Ok(Some(block_id))
+            }
+            Expr::ListContents { list_name, .. } => {
+                let list_id = self.lookup_list_id(lists_map, list_name)?;
+                let block_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "data_listcontents",
                         "next": Value::Null,
                         "parent": parent_id,
                         "inputs": {},

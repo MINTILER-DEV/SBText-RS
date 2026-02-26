@@ -45,6 +45,10 @@ pub enum Expr {
         list_name: String,
         item: Box<Expr>,
     },
+    ListContents {
+        pos: Position,
+        list_name: String,
+    },
     KeyPressed {
         pos: Position,
         key: Box<Expr>,
@@ -81,6 +85,7 @@ impl Expr {
             | Expr::ListItem { pos, .. }
             | Expr::ListLength { pos, .. }
             | Expr::ListContains { pos, .. }
+            | Expr::ListContents { pos, .. }
             | Expr::KeyPressed { pos, .. }
             | Expr::BuiltinReporter { pos, .. }
             | Expr::MathFunc { pos, .. }
@@ -257,6 +262,14 @@ pub enum Statement {
     NextBackdrop {
         pos: Position,
     },
+    SwitchCostumeTo {
+        pos: Position,
+        costume: Expr,
+    },
+    SwitchBackdropTo {
+        pos: Position,
+        backdrop: Expr,
+    },
     Stop {
         pos: Position,
         option: Expr,
@@ -339,6 +352,8 @@ impl Statement {
             | Statement::Hide { pos, .. }
             | Statement::NextCostume { pos, .. }
             | Statement::NextBackdrop { pos, .. }
+            | Statement::SwitchCostumeTo { pos, .. }
+            | Statement::SwitchBackdropTo { pos, .. }
             | Statement::Stop { pos, .. }
             | Statement::Ask { pos, .. }
             | Statement::ResetTimer { pos, .. }

@@ -273,6 +273,9 @@ impl Parser {
         if self.check_keyword("next") {
             return self.parse_next_stmt();
         }
+        if self.check_keyword("switch") {
+            return self.parse_switch_stmt();
+        }
         if self.check_keyword("wait") {
             return self.parse_wait_stmt();
         }
@@ -543,6 +546,27 @@ impl Parser {
             return Ok(Statement::NextBackdrop { pos: start });
         }
         self.error_here("Expected 'costume' or 'backdrop' after 'next'.")
+    }
+
+    fn parse_switch_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("switch", "Expected 'switch'.")?.pos;
+        if self.match_keyword("costume") {
+            self.consume_keyword("to", "Expected 'to' in 'switch costume to'.")?;
+            let costume = self.parse_wrapped_expression()?;
+            return Ok(Statement::SwitchCostumeTo {
+                pos: start,
+                costume,
+            });
+        }
+        if self.match_keyword("backdrop") {
+            self.consume_keyword("to", "Expected 'to' in 'switch backdrop to'.")?;
+            let backdrop = self.parse_wrapped_expression()?;
+            return Ok(Statement::SwitchBackdropTo {
+                pos: start,
+                backdrop,
+            });
+        }
+        self.error_here("Expected 'costume' or 'backdrop' after 'switch'.")
     }
 
     fn parse_wait_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -908,6 +932,9 @@ impl Parser {
         if self.check_keyword("length") {
             return self.parse_length_expr();
         }
+        if self.check_keyword("contents") {
+            return self.parse_contents_expr();
+        }
         if self.check_keyword("key") {
             return self.parse_key_pressed_expr();
         }
@@ -1058,6 +1085,19 @@ impl Parser {
             return Ok(Expr::ListLength { pos: start, list_name });
         }
         self.error_here("Expected list reference after 'length of'.")
+    }
+
+    fn parse_contents_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self.consume_keyword("contents", "Expected 'contents'.")?.pos;
+        self.consume_keyword("of", "Expected 'of' in 'contents of ...'.")?;
+        if self.check_type(TokenType::LBracket) {
+            let list_name = self.parse_list_field_name()?;
+            return Ok(Expr::ListContents {
+                pos: start,
+                list_name,
+            });
+        }
+        self.error_here("Expected list reference after 'contents of'.")
     }
 
     fn parse_key_pressed_expr(&mut self) -> Result<Expr, ParseError> {

@@ -402,6 +402,14 @@ fn decompile_statement(
         "looks_hide" => out.push(format!("{}hide", pad)),
         "looks_nextcostume" => out.push(format!("{}next costume", pad)),
         "looks_nextbackdrop" => out.push(format!("{}next backdrop", pad)),
+        "looks_switchcostumeto" => {
+            let costume = expr_from_input(blocks, block, "COSTUME")?;
+            out.push(format!("{}switch costume to ({})", pad, costume));
+        }
+        "looks_switchbackdropto" => {
+            let backdrop = expr_from_input(blocks, block, "BACKDROP")?;
+            out.push(format!("{}switch backdrop to ({})", pad, backdrop));
+        }
         "control_wait" => {
             let v = expr_from_input(blocks, block, "DURATION")?;
             out.push(format!("{}wait ({})", pad, v));
@@ -564,6 +572,10 @@ fn decompile_statement(
             let v = expr_from_input(blocks, block, "VALUE")?;
             out.push(format!("{}set pen {} to ({})", pad, param, v));
         }
+        "pen_setPenColorToColor" => {
+            let v = expr_from_input(blocks, block, "COLOR")?;
+            out.push(format!("{}set pen color to ({})", pad, v));
+        }
         _ => out.push(format!(
             "{}# unsupported opcode: {} (block {})",
             pad, op, id
@@ -591,26 +603,36 @@ fn input_to_expr(blocks: &Map<String, Value>, input_val: &Value) -> Result<Strin
         return Ok("0".to_string());
     }
     let mode = arr[0].as_i64().unwrap_or_default();
-    let payload = &arr[1];
     match mode {
-        1 => {
-            if let Some(block_id) = payload.as_str() {
-                reporter_expr(blocks, block_id)
-            } else if let Some(lit) = payload.as_array() {
-                Ok(literal_to_expr(lit))
-            } else {
-                Ok("0".to_string())
+        1 | 2 | 3 => {
+            if let Some(expr) = payload_to_expr(blocks, &arr[1])? {
+                return Ok(expr);
             }
-        }
-        2 | 3 => {
-            if let Some(block_id) = payload.as_str() {
-                reporter_expr(blocks, block_id)
-            } else {
-                Ok("0".to_string())
+            if arr.len() > 2 {
+                if let Some(expr) = payload_to_expr(blocks, &arr[2])? {
+                    return Ok(expr);
+                }
             }
+            Ok("0".to_string())
         }
         _ => Ok("0".to_string()),
     }
+}
+
+fn payload_to_expr(blocks: &Map<String, Value>, payload: &Value) -> Result<Option<String>> {
+    if let Some(block_id) = payload.as_str() {
+        return reporter_expr(blocks, block_id).map(Some);
+    }
+    let Some(arr) = payload.as_array() else {
+        return Ok(None);
+    };
+    if arr.is_empty() {
+        return Ok(None);
+    }
+    if let Some(code) = arr[0].as_i64() {
+        return Ok(Some(literal_to_expr_with_code(code, arr)));
+    }
+    Ok(None)
 }
 
 fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> {
@@ -656,6 +678,10 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             format!("length of [{}]", format_bracket_name(&list))
         }
+        "data_listcontents" => {
+            let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
+            format!("contents of [{}]", format_bracket_name(&list))
+        }
         "data_listcontainsitem" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             let item = expr_from_input(blocks, block, "ITEM")?;
@@ -664,6 +690,16 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
         "sensing_keypressed" => {
             let key = key_option(blocks, block).unwrap_or_else(|| "space".to_string());
             format!("key ({}) pressed?", quote_str(&key))
+        }
+        "looks_costume" => {
+            let name =
+                field_first_string(block, "COSTUME").unwrap_or_else(|| "costume1".to_string());
+            quote_str(&name)
+        }
+        "looks_backdrops" => {
+            let name =
+                field_first_string(block, "BACKDROP").unwrap_or_else(|| "backdrop1".to_string());
+            quote_str(&name)
         }
         "operator_not" => format!("not ({})", expr_from_input(blocks, block, "OPERAND")?),
         "operator_add" => binary_expr(blocks, block, "+", "NUM1", "NUM2")?,
@@ -772,14 +808,21 @@ fn field_first_string(block: &Value, field_name: &str) -> Option<String> {
     arr.first()?.as_str().map(ToString::to_string)
 }
 
-fn literal_to_expr(lit: &[Value]) -> String {
+fn literal_to_expr_with_code(code: i64, lit: &[Value]) -> String {
     if lit.len() < 2 {
         return "0".to_string();
     }
-    let code = lit[0].as_i64().unwrap_or_default();
     match code {
-        4 => lit[1].as_str().unwrap_or("0").to_string(),
-        10 => quote_str(lit[1].as_str().unwrap_or("")),
+        4 | 5 | 6 | 7 | 8 => lit[1].as_str().unwrap_or("0").to_string(),
+        9 | 10 | 11 => quote_str(lit[1].as_str().unwrap_or("")),
+        12 => {
+            let name = lit[1].as_str().unwrap_or("var");
+            format_var_ref(name.to_string())
+        }
+        13 => {
+            let name = lit[1].as_str().unwrap_or("list");
+            format!("contents of [{}]", format_bracket_name(name))
+        }
         _ => {
             if let Some(s) = lit[1].as_str() {
                 quote_str(s)

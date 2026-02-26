@@ -448,7 +448,9 @@ fn analyze_statements(
             | Statement::ChangePenSizeBy { value, .. }
             | Statement::SetPenSizeTo { value, .. }
             | Statement::ChangePenColorParamBy { value, .. }
-            | Statement::SetPenColorParamTo { value, .. } => {
+            | Statement::SetPenColorParamTo { value, .. }
+            | Statement::SwitchCostumeTo { costume: value, .. }
+            | Statement::SwitchBackdropTo { backdrop: value, .. } => {
                 analyze_expr(target, value, variables, lists, target_infos, param_scope)?
             }
             Statement::PointInDirection { direction, .. } => {
@@ -576,6 +578,9 @@ fn analyze_expr(
             analyze_expr(target, index, variables, lists, target_infos, param_scope)
         }
         Expr::ListLength { list_name, pos } => {
+            ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)
+        }
+        Expr::ListContents { list_name, pos } => {
             ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)
         }
         Expr::ListContains {
