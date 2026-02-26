@@ -5,41 +5,56 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 
+type ProgressCallback<'a> = dyn FnMut(usize, usize, &str) + 'a;
+
 pub fn decompile_sb3(input: &Path, output: Option<&Path>, split_sprites: bool) -> Result<()> {
-    decompile_sb3_with_progress(input, output, split_sprites, Option::<&mut fn(usize, usize, &str)>::None)
+    decompile_sb3_with_progress(
+        input,
+        output,
+        split_sprites,
+        Option::<&mut fn(usize, usize, &str)>::None,
+    )
 }
 
 pub fn decompile_sb3_with_progress<F>(
     input: &Path,
     output: Option<&Path>,
     split_sprites: bool,
-    mut progress: Option<&mut F>,
+    progress: Option<&mut F>,
 ) -> Result<()>
 where
     F: FnMut(usize, usize, &str),
 {
-    report_progress(&mut progress, 1, 4, "Reading .sb3 archive");
+    let mut progress = progress.map(|cb| cb as &mut ProgressCallback<'_>);
+
+    report_progress(&mut progress, 1, 1, "Reading .sb3 archive");
     let (project_json, assets) = read_sb3(input)?;
-    report_progress(&mut progress, 2, 4, "Decompiling targets");
     let targets = project_json
         .get("targets")
         .and_then(Value::as_array)
         .ok_or_else(|| anyhow!("Invalid project.json: missing 'targets' array."))?;
 
     let mut decompiled_targets = Vec::new();
-    for target in targets {
+    if targets.is_empty() {
+        report_progress(&mut progress, 1, 1, "Decompiling targets");
+    }
+    for (index, target) in targets.iter().enumerate() {
         decompiled_targets.push(decompile_target(target)?);
+        report_progress(
+            &mut progress,
+            index + 1,
+            targets.len().max(1),
+            "Decompiling targets",
+        );
     }
 
     if split_sprites {
-        report_progress(&mut progress, 3, 4, "Writing split SBText output");
         let out_dir = match output {
             Some(path) => path.to_path_buf(),
             None => default_split_output_dir(input),
         };
-        write_split_project(&decompiled_targets, &assets, &out_dir)?;
+        write_split_project(&decompiled_targets, &assets, &out_dir, &mut progress)?;
     } else {
-        report_progress(&mut progress, 3, 4, "Writing SBText output");
         let out_file = match output {
             Some(path) => {
                 if path.extension().is_none() {
@@ -50,15 +65,15 @@ where
             }
             None => input.with_extension("sbtext"),
         };
-        write_single_project(&decompiled_targets, &assets, &out_file)?;
+        write_single_project(&decompiled_targets, &assets, &out_file, &mut progress)?;
     }
 
-    report_progress(&mut progress, 4, 4, "Decompile complete");
+    report_progress(&mut progress, 1, 1, "Decompile complete");
     Ok(())
 }
 
 fn report_progress(
-    progress: &mut Option<&mut impl FnMut(usize, usize, &str)>,
+    progress: &mut Option<&mut ProgressCallback<'_>>,
     step: usize,
     total: usize,
     label: &str,
@@ -991,7 +1006,9 @@ fn write_single_project(
     targets: &[DecompiledTarget],
     assets: &HashMap<String, Vec<u8>>,
     out_file: &Path,
+    progress: &mut Option<&mut ProgressCallback<'_>>,
 ) -> Result<()> {
+    report_progress(progress, 1, 1, "Writing SBText output");
     let mut ordered = targets.to_vec();
     ordered.sort_by_key(|t| if t.is_stage { 0 } else { 1 });
     let mut text = String::new();
@@ -1002,7 +1019,7 @@ fn write_single_project(
 
     if let Some(parent) = out_file.parent() {
         fs::create_dir_all(parent)?;
-        write_assets_for_targets(&ordered, assets, parent)?;
+        write_assets_for_targets(&ordered, assets, parent, progress, "Writing assets")?;
     }
     fs::write(out_file, text.as_bytes())
         .with_context(|| format!("Failed to write '{}'.", out_file.display()))?;
@@ -1013,6 +1030,7 @@ fn write_split_project(
     targets: &[DecompiledTarget],
     assets: &HashMap<String, Vec<u8>>,
     out_dir: &Path,
+    progress: &mut Option<&mut ProgressCallback<'_>>,
 ) -> Result<()> {
     fs::create_dir_all(out_dir)?;
     let mut stage = None;
@@ -1027,12 +1045,19 @@ fn write_split_project(
 
     let mut used_files = HashSet::new();
     let mut imports = Vec::new();
-    for sprite in &sprites {
+    let split_file_total = sprites.len() + 1;
+    for (index, sprite) in sprites.iter().enumerate() {
         let file_name = unique_sprite_filename(&sprite.name, &mut used_files);
         imports.push((sprite.name.clone(), file_name.clone()));
         let sprite_path = out_dir.join(&file_name);
         fs::write(&sprite_path, render_target(sprite).as_bytes())
             .with_context(|| format!("Failed to write '{}'.", sprite_path.display()))?;
+        report_progress(
+            progress,
+            index + 1,
+            split_file_total.max(1),
+            "Writing split SBText output",
+        );
     }
 
     let mut main_text = String::new();
@@ -1055,8 +1080,14 @@ fn write_split_project(
     let main_path = out_dir.join("main.sbtext");
     fs::write(&main_path, main_text.as_bytes())
         .with_context(|| format!("Failed to write '{}'.", main_path.display()))?;
+    report_progress(
+        progress,
+        split_file_total.max(1),
+        split_file_total.max(1),
+        "Writing split SBText output",
+    );
 
-    write_assets_for_targets(targets, assets, out_dir)?;
+    write_assets_for_targets(targets, assets, out_dir, progress, "Writing split assets")?;
     Ok(())
 }
 
@@ -1064,6 +1095,8 @@ fn write_assets_for_targets(
     targets: &[DecompiledTarget],
     assets: &HashMap<String, Vec<u8>>,
     out_dir: &Path,
+    progress: &mut Option<&mut ProgressCallback<'_>>,
+    progress_label: &str,
 ) -> Result<()> {
     let mut needed = HashSet::new();
     for target in targets {
@@ -1071,14 +1104,20 @@ fn write_assets_for_targets(
             needed.insert(costume.clone());
         }
     }
-    for asset_name in needed {
-        if let Some(bytes) = assets.get(&asset_name) {
-            let path = out_dir.join(&asset_name);
+    let mut needed = needed.into_iter().collect::<Vec<_>>();
+    needed.sort_unstable();
+    if needed.is_empty() {
+        return Ok(());
+    }
+    for (index, asset_name) in needed.iter().enumerate() {
+        if let Some(bytes) = assets.get(asset_name) {
+            let path = out_dir.join(asset_name);
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
             fs::write(path, bytes)?;
         }
+        report_progress(progress, index + 1, needed.len(), progress_label);
     }
     Ok(())
 }

@@ -20,6 +20,8 @@ use imports::{resolve_merged_source_with_map, MergedSource};
 use lexer::Lexer;
 use parser::Parser as SbParser;
 use semantic::analyze as semantic_analyze;
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 #[cfg(all(target_arch = "wasm32", feature = "wasm-bindings"))]
@@ -34,64 +36,69 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         if args.emit_merged.is_some() {
             anyhow::bail!("--emit-merged cannot be used with --decompile.");
         }
-        let progress = CliProgress::new("Decompile", 5);
-        progress.emit(1, "Resolving input path");
+        let mut progress = CliProgress::new("Decompile");
+        progress.emit("Resolving input path", 1, 1);
         let input = canonicalize_file(&args.input)?;
-        let mut decomp_stage_cb = |step: usize, total: usize, label: &str| {
-            let mapped = 1 + step;
-            let expected_total = 1 + total;
-            progress.emit_with_total(mapped, expected_total, label);
+        let result = {
+            let mut decomp_stage_cb = |step: usize, total: usize, label: &str| {
+                progress.emit(label, step, total);
+            };
+            decompile::decompile_sb3_with_progress(
+                &input,
+                args.output.as_deref(),
+                args.split_sprites,
+                Some(&mut decomp_stage_cb),
+            )
         };
-        return decompile::decompile_sb3_with_progress(
-            &input,
-            args.output.as_deref(),
-            args.split_sprites,
-            Some(&mut decomp_stage_cb),
-        );
+        progress.finish();
+        return result;
     }
 
     if args.split_sprites {
         anyhow::bail!("--split-sprites requires --decompile.");
     }
 
-    let total_stages = 3
-        + usize::from(args.emit_merged.is_some())
-        + usize::from(args.output.is_some());
-    let progress = CliProgress::new("Compile", total_stages);
-    let mut stage = 0usize;
-
-    stage += 1;
-    progress.emit(stage, "Resolving input path");
+    let mut progress = CliProgress::new("Compile");
+    progress.emit("Resolving input path", 1, 1);
     let input = canonicalize_file(&args.input)?;
 
-    stage += 1;
-    progress.emit(stage, "Resolving imports");
+    progress.emit("Resolving imports", 1, 1);
     let merged = resolve_merged_source_with_map(&input)?;
 
-    stage += 1;
-    progress.emit(stage, "Lexing, parsing, and semantic checks");
+    progress.emit("Lexing, parsing, and semantic checks", 1, 1);
     let project = parse_and_validate_project(&merged)?;
 
     if let Some(emit_path) = &args.emit_merged {
-        stage += 1;
-        progress.emit(stage, "Writing merged source");
+        progress.emit("Writing merged source", 1, 1);
         std::fs::write(emit_path, merged.source.as_bytes())?;
     }
 
     if let Some(output) = &args.output {
-        stage += 1;
         if args.python_backend {
-            progress.emit(stage, "Building .sb3 (Python backend)");
+            progress.emit("Building .sb3 (Python backend)", 1, 1);
             python_backend::compile_with_python(&input, &merged.source, output, args.no_svg_scale)?;
         } else {
-            progress.emit(stage, "Building .sb3 (native backend)");
             let options = CodegenOptions {
                 scale_svgs: !args.no_svg_scale,
             };
-            codegen::write_sb3(&project, &input.parent().unwrap_or(input.as_path()), output, options)?;
+            let result = {
+                let mut codegen_progress_cb = |step: usize, total: usize, label: &str| {
+                    progress.emit(label, step, total);
+                };
+                codegen::write_sb3_with_progress(
+                    &project,
+                    &input.parent().unwrap_or(input.as_path()),
+                    output,
+                    options,
+                    Some(&mut codegen_progress_cb),
+                )
+            };
+            result?;
         }
     }
 
+    progress.emit("Compile complete", 1, 1);
+    progress.finish();
     Ok(())
 }
 
@@ -231,30 +238,54 @@ fn pretty_path(path: &Path) -> String {
 #[cfg(not(target_arch = "wasm32"))]
 struct CliProgress {
     prefix: &'static str,
-    total: usize,
+    is_tty: bool,
+    rendered_line_len: usize,
+    has_rendered: bool,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl CliProgress {
-    fn new(prefix: &'static str, total: usize) -> Self {
+    fn new(prefix: &'static str) -> Self {
         Self {
             prefix,
-            total: total.max(1),
+            is_tty: io::stderr().is_terminal(),
+            rendered_line_len: 0,
+            has_rendered: false,
         }
     }
 
-    fn emit(&self, step: usize, label: &str) {
-        self.emit_with_total(step, self.total, label);
-    }
-
-    fn emit_with_total(&self, step: usize, total: usize, label: &str) {
+    fn emit(&mut self, label: &str, step: usize, total: usize) {
         let total = total.max(1);
         let step = step.clamp(1, total);
         let bar = render_progress_bar(step, total, 14);
-        eprintln!(
+        let line = format!(
             "[{}] {}... ({}/{}) {}",
             self.prefix, label, step, total, bar
         );
+        if self.is_tty {
+            let clear_padding_len = self.rendered_line_len.saturating_sub(line.len());
+            eprint!("\r{}{}", line, " ".repeat(clear_padding_len));
+            let _ = io::stderr().flush();
+            self.rendered_line_len = line.len();
+            self.has_rendered = true;
+        } else {
+            eprintln!("{}", line);
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.is_tty && self.has_rendered {
+            eprintln!();
+            self.has_rendered = false;
+            self.rendered_line_len = 0;
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for CliProgress {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 

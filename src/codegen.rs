@@ -15,6 +15,8 @@ const DEFAULT_STAGE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" widt
 const DEFAULT_SPRITE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
 const DEFAULT_SVG_TARGET_SIZE: f64 = 64.0;
 
+type CodegenProgressCallback<'a> = dyn FnMut(usize, usize, &str) + 'a;
+
 #[derive(Debug, Clone, Copy)]
 pub struct CodegenOptions {
     pub scale_svgs: bool,
@@ -27,7 +29,26 @@ impl Default for CodegenOptions {
 }
 
 pub fn write_sb3(project: &Project, source_dir: &Path, output_path: &Path, options: CodegenOptions) -> Result<()> {
-    let bytes = build_sb3_bytes(project, source_dir, options)?;
+    write_sb3_with_progress(
+        project,
+        source_dir,
+        output_path,
+        options,
+        Option::<&mut fn(usize, usize, &str)>::None,
+    )
+}
+
+pub fn write_sb3_with_progress<F>(
+    project: &Project,
+    source_dir: &Path,
+    output_path: &Path,
+    options: CodegenOptions,
+    progress: Option<&mut F>,
+) -> Result<()>
+where
+    F: FnMut(usize, usize, &str),
+{
+    let bytes = build_sb3_bytes_with_progress(project, source_dir, options, progress)?;
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -36,20 +57,58 @@ pub fn write_sb3(project: &Project, source_dir: &Path, output_path: &Path, optio
 }
 
 pub fn build_sb3_bytes(project: &Project, source_dir: &Path, options: CodegenOptions) -> Result<Vec<u8>> {
+    build_sb3_bytes_with_progress(
+        project,
+        source_dir,
+        options,
+        Option::<&mut fn(usize, usize, &str)>::None,
+    )
+}
+
+pub fn build_sb3_bytes_with_progress<F>(
+    project: &Project,
+    source_dir: &Path,
+    options: CodegenOptions,
+    progress: Option<&mut F>,
+) -> Result<Vec<u8>>
+where
+    F: FnMut(usize, usize, &str),
+{
+    let mut progress = progress.map(|cb| cb as &mut CodegenProgressCallback<'_>);
     let mut builder = ProjectBuilder::new(project, source_dir, options);
-    let (project_json, assets) = builder.build()?;
+    let (project_json, assets) = builder.build_with_progress(&mut progress)?;
     let mut buffer = Cursor::new(Vec::<u8>::new());
     let mut zip = zip::ZipWriter::new(&mut buffer);
     let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    report_progress(&mut progress, 1, 1, "Writing project.json");
     zip.start_file("project.json", opts)?;
     let project_bytes = serde_json::to_vec_pretty(&project_json)?;
     zip.write_all(&project_bytes)?;
-    for (name, bytes) in assets {
+
+    let mut assets = assets.into_iter().collect::<Vec<_>>();
+    assets.sort_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name));
+    let asset_total = assets.len().max(1);
+    if assets.is_empty() {
+        report_progress(&mut progress, 1, 1, "Packaging assets");
+    }
+    for (index, (name, bytes)) in assets.into_iter().enumerate() {
         zip.start_file(name, opts)?;
         zip.write_all(&bytes)?;
+        report_progress(&mut progress, index + 1, asset_total, "Packaging assets");
     }
     zip.finish()?;
     Ok(buffer.into_inner())
+}
+
+fn report_progress(
+    progress: &mut Option<&mut CodegenProgressCallback<'_>>,
+    step: usize,
+    total: usize,
+    label: &str,
+) {
+    if let Some(cb) = progress.as_deref_mut() {
+        cb(step, total, label);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +165,10 @@ impl<'a> ProjectBuilder<'a> {
         }
     }
 
-    fn build(&mut self) -> Result<(Value, HashMap<String, Vec<u8>>)> {
+    fn build_with_progress(
+        &mut self,
+        progress: &mut Option<&mut CodegenProgressCallback<'_>>,
+    ) -> Result<(Value, HashMap<String, Vec<u8>>)> {
         self.broadcast_ids = self.collect_broadcast_ids();
         self.remote_calls = self.collect_remote_call_specs()?;
         self.register_remote_call_broadcasts();
@@ -121,7 +183,10 @@ impl<'a> ProjectBuilder<'a> {
 
         let mut targets_json = Vec::new();
         let mut sprite_layer = 1;
-        for target in &ordered_targets {
+        if ordered_targets.is_empty() {
+            report_progress(progress, 1, 1, "Emitting targets");
+        }
+        for (index, target) in ordered_targets.iter().enumerate() {
             let layer = if target.is_stage {
                 0
             } else {
@@ -130,6 +195,12 @@ impl<'a> ProjectBuilder<'a> {
                 out
             };
             targets_json.push(self.build_target_json(target, layer)?);
+            report_progress(
+                progress,
+                index + 1,
+                ordered_targets.len().max(1),
+                "Emitting targets",
+            );
         }
 
         let extensions = self.collect_extensions();
