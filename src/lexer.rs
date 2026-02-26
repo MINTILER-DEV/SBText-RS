@@ -99,6 +99,10 @@ impl<'a> Lexer<'a> {
                 tokens.push(self.read_number());
                 continue;
             }
+            if ch == '.' && self.peek_next().is_ascii_digit() {
+                tokens.push(self.read_number_starting_with_dot());
+                continue;
+            }
             if ch.is_ascii_alphabetic() || ch == '_' {
                 tokens.push(self.read_identifier());
                 continue;
@@ -268,6 +272,20 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn read_number_starting_with_dot(&mut self) -> Token {
+        let pos = self.pos();
+        let mut text = String::from(".");
+        self.advance();
+        while !self.at_end() && self.peek().is_ascii_digit() {
+            text.push(self.advance());
+        }
+        Token {
+            typ: TokenType::Number,
+            value: text,
+            pos,
+        }
+    }
+
     fn read_string(&mut self) -> Result<Token, LexerError> {
         let pos = self.pos();
         self.advance();
@@ -326,6 +344,14 @@ impl<'a> Lexer<'a> {
             '\0'
         } else {
             self.chars[self.index]
+        }
+    }
+
+    fn peek_next(&self) -> char {
+        if self.index + 1 >= self.chars.len() {
+            '\0'
+        } else {
+            self.chars[self.index + 1]
         }
     }
 
