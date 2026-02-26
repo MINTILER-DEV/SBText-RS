@@ -6,7 +6,21 @@ use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 
 pub fn decompile_sb3(input: &Path, output: Option<&Path>, split_sprites: bool) -> Result<()> {
+    decompile_sb3_with_progress(input, output, split_sprites, Option::<&mut fn(usize, usize, &str)>::None)
+}
+
+pub fn decompile_sb3_with_progress<F>(
+    input: &Path,
+    output: Option<&Path>,
+    split_sprites: bool,
+    mut progress: Option<&mut F>,
+) -> Result<()>
+where
+    F: FnMut(usize, usize, &str),
+{
+    report_progress(&mut progress, 1, 4, "Reading .sb3 archive");
     let (project_json, assets) = read_sb3(input)?;
+    report_progress(&mut progress, 2, 4, "Decompiling targets");
     let targets = project_json
         .get("targets")
         .and_then(Value::as_array)
@@ -18,12 +32,14 @@ pub fn decompile_sb3(input: &Path, output: Option<&Path>, split_sprites: bool) -
     }
 
     if split_sprites {
+        report_progress(&mut progress, 3, 4, "Writing split SBText output");
         let out_dir = match output {
             Some(path) => path.to_path_buf(),
             None => default_split_output_dir(input),
         };
         write_split_project(&decompiled_targets, &assets, &out_dir)?;
     } else {
+        report_progress(&mut progress, 3, 4, "Writing SBText output");
         let out_file = match output {
             Some(path) => {
                 if path.extension().is_none() {
@@ -37,7 +53,19 @@ pub fn decompile_sb3(input: &Path, output: Option<&Path>, split_sprites: bool) -
         write_single_project(&decompiled_targets, &assets, &out_file)?;
     }
 
+    report_progress(&mut progress, 4, 4, "Decompile complete");
     Ok(())
+}
+
+fn report_progress(
+    progress: &mut Option<&mut impl FnMut(usize, usize, &str)>,
+    step: usize,
+    total: usize,
+    label: &str,
+) {
+    if let Some(cb) = progress.as_deref_mut() {
+        cb(step, total, label);
+    }
 }
 
 fn read_sb3(input: &Path) -> Result<(Value, HashMap<String, Vec<u8>>)> {

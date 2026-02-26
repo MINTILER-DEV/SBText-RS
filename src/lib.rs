@@ -34,26 +34,57 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         if args.emit_merged.is_some() {
             anyhow::bail!("--emit-merged cannot be used with --decompile.");
         }
+        let progress = CliProgress::new("Decompile", 5);
+        progress.emit(1, "Resolving input path");
         let input = canonicalize_file(&args.input)?;
-        return decompile::decompile_sb3(&input, args.output.as_deref(), args.split_sprites);
+        let mut decomp_stage_cb = |step: usize, total: usize, label: &str| {
+            let mapped = 1 + step;
+            let expected_total = 1 + total;
+            progress.emit_with_total(mapped, expected_total, label);
+        };
+        return decompile::decompile_sb3_with_progress(
+            &input,
+            args.output.as_deref(),
+            args.split_sprites,
+            Some(&mut decomp_stage_cb),
+        );
     }
 
     if args.split_sprites {
         anyhow::bail!("--split-sprites requires --decompile.");
     }
 
+    let total_stages = 3
+        + usize::from(args.emit_merged.is_some())
+        + usize::from(args.output.is_some());
+    let progress = CliProgress::new("Compile", total_stages);
+    let mut stage = 0usize;
+
+    stage += 1;
+    progress.emit(stage, "Resolving input path");
     let input = canonicalize_file(&args.input)?;
+
+    stage += 1;
+    progress.emit(stage, "Resolving imports");
     let merged = resolve_merged_source_with_map(&input)?;
+
+    stage += 1;
+    progress.emit(stage, "Lexing, parsing, and semantic checks");
     let project = parse_and_validate_project(&merged)?;
 
     if let Some(emit_path) = &args.emit_merged {
+        stage += 1;
+        progress.emit(stage, "Writing merged source");
         std::fs::write(emit_path, merged.source.as_bytes())?;
     }
 
     if let Some(output) = &args.output {
+        stage += 1;
         if args.python_backend {
+            progress.emit(stage, "Building .sb3 (Python backend)");
             python_backend::compile_with_python(&input, &merged.source, output, args.no_svg_scale)?;
         } else {
+            progress.emit(stage, "Building .sb3 (native backend)");
             let options = CodegenOptions {
                 scale_svgs: !args.no_svg_scale,
             };
@@ -195,4 +226,47 @@ fn pretty_path(path: &Path) -> String {
     } else {
         raw
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+struct CliProgress {
+    prefix: &'static str,
+    total: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl CliProgress {
+    fn new(prefix: &'static str, total: usize) -> Self {
+        Self {
+            prefix,
+            total: total.max(1),
+        }
+    }
+
+    fn emit(&self, step: usize, label: &str) {
+        self.emit_with_total(step, self.total, label);
+    }
+
+    fn emit_with_total(&self, step: usize, total: usize, label: &str) {
+        let total = total.max(1);
+        let step = step.clamp(1, total);
+        let bar = render_progress_bar(step, total, 14);
+        eprintln!(
+            "[{}] {}... ({}/{}) {}",
+            self.prefix, label, step, total, bar
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn render_progress_bar(step: usize, total: usize, width: usize) -> String {
+    let width = width.max(1);
+    let filled = ((step * width) + (total / 2)) / total;
+    let mut s = String::with_capacity(width + 2);
+    s.push('[');
+    for i in 0..width {
+        s.push(if i < filled { '=' } else { '-' });
+    }
+    s.push(']');
+    s
 }
