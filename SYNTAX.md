@@ -77,7 +77,7 @@ Import line notes:
 
 ### 4.4 Reserved keywords
 
-`add all and answer ask at backdrop bounce broadcast by change clicked contains costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop then think this timer to turn until var wait when while with x y`
+`add all and answer ask at backdrop bounce broadcast by change clicked contains contents costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop switch then think this timer to turn until var wait when while with x y`
 
 ## 5) File and target structure
 
@@ -175,6 +175,8 @@ show
 hide
 next costume
 next backdrop
+switch costume to (expr)
+switch backdrop to (expr)
 ```
 
 `move (expr) steps` is also accepted.
@@ -313,6 +315,7 @@ Rules:
 pick random (a) to (b)
 item (index) of [list]
 length of [list]
+contents of [list]
 [list] contains (expr)
 key (expr) pressed?
 answer
