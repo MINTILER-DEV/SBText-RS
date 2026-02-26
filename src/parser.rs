@@ -1275,21 +1275,15 @@ impl Parser {
         if self.check_keyword("key") {
             return self.parse_key_pressed_expr();
         }
-        if self.check_keyword("floor") {
-            return self.parse_math_func_expr("floor");
-        }
-        if self.check_keyword("round") {
-            return self.parse_math_func_expr("round");
-        }
         if (token.typ == TokenType::Ident || token.typ == TokenType::Keyword)
-            && token.value.eq_ignore_ascii_case("abs")
+            && is_math_func_name(&token.value)
             && self.peek().typ == TokenType::LParen
         {
             let start = self.advance().pos;
             let value = self.parse_wrapped_expression()?;
             return Ok(Expr::MathFunc {
                 pos: start,
-                op: "abs".to_string(),
+                op: token.value.to_lowercase(),
                 value: Box::new(value),
             });
         }
@@ -1457,18 +1451,6 @@ impl Parser {
         Ok(Expr::KeyPressed {
             pos: start,
             key: Box::new(key),
-        })
-    }
-
-    fn parse_math_func_expr(&mut self, op: &str) -> Result<Expr, ParseError> {
-        let start = self
-            .consume_keyword(op, format!("Expected '{}'.", op).as_str())?
-            .pos;
-        let value = self.parse_wrapped_expression()?;
-        Ok(Expr::MathFunc {
-            pos: start,
-            op: op.to_string(),
-            value: Box::new(value),
         })
     }
 
@@ -1769,6 +1751,27 @@ fn precedence_of(op: &str) -> Option<i32> {
 
 fn is_pen_color_param(name: &str) -> bool {
     matches!(name, "color" | "saturation" | "brightness" | "transparency")
+}
+
+fn is_math_func_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "abs"
+            | "floor"
+            | "ceiling"
+            | "sqrt"
+            | "sin"
+            | "cos"
+            | "tan"
+            | "asin"
+            | "acos"
+            | "atan"
+            | "ln"
+            | "log"
+            | "e ^"
+            | "10 ^"
+            | "round"
+    )
 }
 
 fn append_procedure_name_part(name: &mut String, part: &str) {
