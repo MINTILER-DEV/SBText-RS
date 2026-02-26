@@ -36,4 +36,10 @@ pub struct Args {
         help = "When used with --decompile, writes output as multiple sprite files plus main.sbtext (stage)."
     )]
     pub split_sprites: bool,
+
+    #[arg(
+        long,
+        help = "Allow unresolved procedure calls. Unknown procedure calls compile as no-op wait(0) blocks."
+    )]
+    pub allow_unknown_procedures: bool,
 }

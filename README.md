@@ -35,6 +35,7 @@ cargo build --target wasm32-unknown-unknown --features wasm-bindings --lib
 sbtext-rs INPUT OUTPUT
 sbtext-rs INPUT OUTPUT --no-svg-scale
 sbtext-rs INPUT OUTPUT --python-backend
+sbtext-rs INPUT OUTPUT --allow-unknown-procedures
 sbtext-rs INPUT --emit-merged merged.sbtext
 sbtext-rs INPUT.sb3 --decompile
 sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites

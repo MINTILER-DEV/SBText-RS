@@ -8,6 +8,21 @@ pub struct SemanticError {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SemanticOptions {
+    pub allow_unknown_procedures: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SemanticWarning {
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SemanticReport {
+    pub warnings: Vec<SemanticWarning>,
+}
+
 impl Display for SemanticError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
@@ -31,6 +46,13 @@ struct TargetInfo {
 }
 
 pub fn analyze(project: &Project) -> Result<(), SemanticError> {
+    analyze_with_options(project, SemanticOptions::default()).map(|_| ())
+}
+
+pub fn analyze_with_options(
+    project: &Project,
+    options: SemanticOptions,
+) -> Result<SemanticReport, SemanticError> {
     if project.targets.is_empty() {
         return Err(SemanticError {
             message: "Project must define at least one target.".to_string(),
@@ -77,15 +99,18 @@ pub fn analyze(project: &Project) -> Result<(), SemanticError> {
         );
     }
 
+    let mut warnings = Vec::new();
     for target in &project.targets {
-        analyze_target(target, &target_infos)?;
+        analyze_target(target, &target_infos, options, &mut warnings)?;
     }
-    Ok(())
+    Ok(SemanticReport { warnings })
 }
 
 fn analyze_target(
     target: &Target,
     target_infos: &HashMap<String, TargetInfo>,
+    options: SemanticOptions,
+    warnings: &mut Vec<SemanticWarning>,
 ) -> Result<(), SemanticError> {
     let mut variables: HashMap<String, usize> = HashMap::new();
     for decl in &target.variables {
@@ -151,6 +176,8 @@ fn analyze_target(
             target_infos,
             &param_scope,
             &format!("procedure '{}'", procedure.name),
+            options,
+            warnings,
         )?;
     }
 
@@ -162,6 +189,8 @@ fn analyze_target(
             &lists,
             &procedures,
             target_infos,
+            options,
+            warnings,
         )?;
     }
 
@@ -175,6 +204,8 @@ fn analyze_event_script(
     lists: &HashMap<String, usize>,
     procedures: &HashMap<String, ProcedureInfo>,
     target_infos: &HashMap<String, TargetInfo>,
+    options: SemanticOptions,
+    warnings: &mut Vec<SemanticWarning>,
 ) -> Result<(), SemanticError> {
     analyze_statements(
         target,
@@ -185,6 +216,8 @@ fn analyze_event_script(
         target_infos,
         &HashSet::new(),
         "event script",
+        options,
+        warnings,
     )
 }
 
@@ -197,6 +230,8 @@ fn analyze_statements(
     target_infos: &HashMap<String, TargetInfo>,
     param_scope: &HashSet<String>,
     scope_name: &str,
+    options: SemanticOptions,
+    warnings: &mut Vec<SemanticWarning>,
 ) -> Result<(), SemanticError> {
     for stmt in statements {
         match stmt {
@@ -301,6 +336,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
             }
             Statement::ForEach {
@@ -328,6 +365,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
             }
             Statement::While {
@@ -350,6 +389,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
             }
             Statement::RepeatUntil {
@@ -372,6 +413,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
             }
             Statement::Forever { body, .. } => {
@@ -384,6 +427,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
             }
             Statement::If {
@@ -409,6 +454,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
                 analyze_statements(
                     target,
@@ -419,6 +466,8 @@ fn analyze_statements(
                     target_infos,
                     param_scope,
                     scope_name,
+                    options,
+                    warnings,
                 )?;
             }
             Statement::ProcedureCall { name, args, pos } => {
@@ -439,23 +488,49 @@ fn analyze_statements(
                 } else if let Some((remote_target_name, remote_proc_name)) = split_qualified(name) {
                     let Some(remote_target) = target_infos.get(&remote_target_name.to_lowercase())
                     else {
-                        return Err(SemanticError {
-                            message: format!(
-                                "Unknown target '{}' in procedure call '{}' at line {}, column {} in target '{}'.",
-                                remote_target_name, name, pos.line, pos.column, target.name
-                            ),
-                        });
+                        if options.allow_unknown_procedures {
+                            warnings.push(SemanticWarning {
+                                message: format!(
+                                    "Allowed unknown procedure call '{}' at line {}, column {} in target '{}' because allow_unknown_procedures is enabled.",
+                                    name, pos.line, pos.column, target.name
+                                ),
+                            });
+                        } else {
+                            return Err(SemanticError {
+                                message: format!(
+                                    "Unknown target '{}' in procedure call '{}' at line {}, column {} in target '{}'.",
+                                    remote_target_name, name, pos.line, pos.column, target.name
+                                ),
+                            });
+                        }
+                        for arg in args {
+                            analyze_expr(target, arg, variables, lists, target_infos, param_scope)?;
+                        }
+                        continue;
                     };
                     let Some(expected_args) = remote_target
                         .procedures
                         .get(&remote_proc_name.to_lowercase())
                     else {
-                        return Err(SemanticError {
-                            message: format!(
-                                "Unknown procedure '{}' on target '{}' at line {}, column {} in target '{}'.",
-                                remote_proc_name, remote_target.name, pos.line, pos.column, target.name
-                            ),
-                        });
+                        if options.allow_unknown_procedures {
+                            warnings.push(SemanticWarning {
+                                message: format!(
+                                    "Allowed unknown procedure call '{}' at line {}, column {} in target '{}' because allow_unknown_procedures is enabled.",
+                                    name, pos.line, pos.column, target.name
+                                ),
+                            });
+                        } else {
+                            return Err(SemanticError {
+                                message: format!(
+                                    "Unknown procedure '{}' on target '{}' at line {}, column {} in target '{}'.",
+                                    remote_proc_name, remote_target.name, pos.line, pos.column, target.name
+                                ),
+                            });
+                        }
+                        for arg in args {
+                            analyze_expr(target, arg, variables, lists, target_infos, param_scope)?;
+                        }
+                        continue;
                     };
                     if args.len() != *expected_args {
                         return Err(SemanticError {
@@ -478,12 +553,21 @@ fn analyze_statements(
                         }
                         continue;
                     }
-                    return Err(SemanticError {
-                        message: format!(
-                            "Unknown procedure '{}' at line {}, column {} in target '{}'.",
-                            name, pos.line, pos.column, target.name
-                        ),
-                    });
+                    if options.allow_unknown_procedures {
+                        warnings.push(SemanticWarning {
+                            message: format!(
+                                "Allowed unknown procedure call '{}' at line {}, column {} in target '{}' because allow_unknown_procedures is enabled.",
+                                name, pos.line, pos.column, target.name
+                            ),
+                        });
+                    } else {
+                        return Err(SemanticError {
+                            message: format!(
+                                "Unknown procedure '{}' at line {}, column {} in target '{}'.",
+                                name, pos.line, pos.column, target.name
+                            ),
+                        });
+                    }
                 }
                 for arg in args {
                     analyze_expr(target, arg, variables, lists, target_infos, param_scope)?;

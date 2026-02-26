@@ -213,6 +213,19 @@ impl Parser {
                 return self.error_here("Broadcast message cannot be empty.");
             }
             EventType::WhenIReceive(msg)
+        } else if self.check_type(TokenType::LBracket) {
+            let key_name = self.parse_bracket_text()?;
+            if key_name.is_empty() {
+                return self.error_here("Key name cannot be empty in key press event.");
+            }
+            self.consume_keyword("key", "Expected 'key' in 'when [key] key pressed'.")?;
+            let word = self.current_word();
+            if word.as_deref() == Some("pressed") || word.as_deref() == Some("pressed?") {
+                self.advance();
+            } else {
+                return self.error_here("Expected 'pressed' in 'when [key] key pressed'.");
+            }
+            EventType::WhenKeyPressed(key_name)
         } else {
             return self.error_here("Unknown event header after 'when'.");
         };

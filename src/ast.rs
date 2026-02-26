@@ -470,6 +470,7 @@ pub enum EventType {
     WhenFlagClicked,
     WhenThisSpriteClicked,
     WhenIReceive(String),
+    WhenKeyPressed(String),
 }
 
 #[derive(Debug, Clone)]

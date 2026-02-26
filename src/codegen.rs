@@ -23,11 +23,15 @@ type CodegenProgressCallback<'a> = dyn FnMut(usize, usize, &str) + 'a;
 #[derive(Debug, Clone, Copy)]
 pub struct CodegenOptions {
     pub scale_svgs: bool,
+    pub allow_unknown_procedures: bool,
 }
 
 impl Default for CodegenOptions {
     fn default() -> Self {
-        Self { scale_svgs: true }
+        Self {
+            scale_svgs: true,
+            allow_unknown_procedures: false,
+        }
     }
 }
 
@@ -600,6 +604,14 @@ impl<'a> ProjectBuilder<'a> {
         }
     }
 
+    fn has_remote_call_spec(&self, callee_target: &str, callee_proc: &str) -> bool {
+        let target_lower = callee_target.to_lowercase();
+        let proc_lower = callee_proc.to_lowercase();
+        self.remote_calls
+            .iter()
+            .any(|s| s.callee_target_lower == target_lower && s.procedure_lower == proc_lower)
+    }
+
     fn lookup_remote_call_spec(
         &self,
         callee_target: &str,
@@ -834,6 +846,9 @@ impl<'a> ProjectBuilder<'a> {
                     "event_whenbroadcastreceived",
                     json!({"BROADCAST_OPTION": [msg.clone(), bid]}),
                 )
+            }
+            EventType::WhenKeyPressed(key_name) => {
+                ("event_whenkeypressed", json!({"KEY_OPTION": [key_name.clone(), Value::Null]}))
             }
         };
         let hat_id = self.new_block_id();
@@ -2618,6 +2633,30 @@ impl<'a> ProjectBuilder<'a> {
         Ok(block_id)
     }
 
+    fn emit_noop_wait_zero_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+    ) -> Result<EmittedStatement> {
+        let block_id = self.new_block_id();
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "control_wait",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": { "DURATION": [1, [4, "0"]] },
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(EmittedStatement {
+            first: block_id.clone(),
+            last: block_id,
+        })
+    }
+
     fn emit_call_stmt(
         &mut self,
         blocks: &mut Map<String, Value>,
@@ -2629,8 +2668,24 @@ impl<'a> ProjectBuilder<'a> {
         lists_map: &HashMap<String, String>,
         param_scope: &HashSet<String>,
     ) -> Result<EmittedStatement> {
-        if !signatures.contains_key(&name.to_lowercase()) {
+        let name_lower = name.to_lowercase();
+        if !signatures.contains_key(&name_lower) {
             if let Some((callee_target, callee_proc)) = split_qualified(name) {
+                if self.has_remote_call_spec(callee_target, callee_proc) {
+                    return self.emit_remote_call_stmt(
+                        blocks,
+                        parent_id,
+                        callee_target,
+                        callee_proc,
+                        args,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                    );
+                }
+                if self.options.allow_unknown_procedures {
+                    return self.emit_noop_wait_zero_stmt(blocks, parent_id);
+                }
                 return self.emit_remote_call_stmt(
                     blocks,
                     parent_id,
@@ -2642,29 +2697,16 @@ impl<'a> ProjectBuilder<'a> {
                     param_scope,
                 );
             }
-            if is_ignored_noop_call(name) {
-                let block_id = self.new_block_id();
-                blocks.insert(
-                    block_id.clone(),
-                    json!({
-                        "opcode": "control_wait",
-                        "next": Value::Null,
-                        "parent": parent_id,
-                        "inputs": { "DURATION": [1, [4, "0"]] },
-                        "fields": {},
-                        "shadow": false,
-                        "topLevel": false
-                    }),
-                );
-                return Ok(EmittedStatement {
-                    first: block_id.clone(),
-                    last: block_id,
-                });
+            if is_ignored_noop_call(name) || self.options.allow_unknown_procedures {
+                return self.emit_noop_wait_zero_stmt(blocks, parent_id);
             }
         }
-        let sig = signatures
-            .get(&name.to_lowercase())
-            .ok_or_else(|| anyhow!("Unknown procedure '{}' during codegen.", name))?;
+        let Some(sig) = signatures.get(&name_lower) else {
+            if self.options.allow_unknown_procedures {
+                return self.emit_noop_wait_zero_stmt(blocks, parent_id);
+            }
+            return Err(anyhow!("Unknown procedure '{}' during codegen.", name));
+        };
         let block_id = self.new_block_id();
         let mut inputs = Map::new();
         for (arg_id, expr) in sig.arg_ids.iter().zip(args.iter()) {

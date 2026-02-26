@@ -19,7 +19,10 @@ use codegen::CodegenOptions;
 use imports::{resolve_merged_source_with_map, MergedSource};
 use lexer::Lexer;
 use parser::Parser as SbParser;
-use semantic::analyze as semantic_analyze;
+use semantic::{
+    analyze as semantic_analyze, analyze_with_options as semantic_analyze_with_options, SemanticOptions,
+    SemanticReport,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
@@ -35,6 +38,9 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         }
         if args.emit_merged.is_some() {
             anyhow::bail!("--emit-merged cannot be used with --decompile.");
+        }
+        if args.allow_unknown_procedures {
+            anyhow::bail!("--allow-unknown-procedures cannot be used with --decompile.");
         }
         let mut progress = CliProgress::new("Decompile");
         progress.emit("Resolving input path", 1, 1);
@@ -57,6 +63,11 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
     if args.split_sprites {
         anyhow::bail!("--split-sprites requires --decompile.");
     }
+    if args.python_backend && args.allow_unknown_procedures {
+        anyhow::bail!(
+            "--allow-unknown-procedures is only supported by the native Rust backend (remove --python-backend)."
+        );
+    }
 
     let mut progress = CliProgress::new("Compile");
     progress.emit("Resolving input path", 1, 1);
@@ -66,7 +77,21 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
     let merged = resolve_merged_source_with_map(&input)?;
 
     progress.emit("Lexing, parsing, and semantic checks", 1, 1);
-    let project = parse_and_validate_project(&merged)?;
+    let (project, semantic_report) = parse_and_validate_project_with_options(
+        &merged,
+        SemanticOptions {
+            allow_unknown_procedures: args.allow_unknown_procedures,
+        },
+    )?;
+    if args.allow_unknown_procedures {
+        progress.finish();
+        eprintln!(
+            "Warning: --allow-unknown-procedures is enabled. Unknown procedure calls will compile as no-op wait(0) blocks."
+        );
+        for warning in semantic_report.warnings {
+            eprintln!("Warning: {}", warning.message);
+        }
+    }
 
     if let Some(emit_path) = &args.emit_merged {
         progress.emit("Writing merged source", 1, 1);
@@ -80,6 +105,7 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         } else {
             let options = CodegenOptions {
                 scale_svgs: !args.no_svg_scale,
+                allow_unknown_procedures: args.allow_unknown_procedures,
             };
             let result = {
                 let mut codegen_progress_cb = |step: usize, total: usize, label: &str| {
@@ -109,16 +135,34 @@ pub fn compile_entry_to_sb3_bytes(input: &Path, scale_svgs: bool) -> Result<Vec<
     codegen::build_sb3_bytes(
         &project,
         &input.parent().unwrap_or(input.as_path()),
-        CodegenOptions { scale_svgs },
+        CodegenOptions {
+            scale_svgs,
+            allow_unknown_procedures: false,
+        },
     )
 }
 
 pub fn compile_source_to_sb3_bytes(source: &str, source_dir: &Path, scale_svgs: bool) -> Result<Vec<u8>> {
     let project = parse_and_validate_source(source)?;
-    codegen::build_sb3_bytes(&project, source_dir, CodegenOptions { scale_svgs })
+    codegen::build_sb3_bytes(
+        &project,
+        source_dir,
+        CodegenOptions {
+            scale_svgs,
+            allow_unknown_procedures: false,
+        },
+    )
 }
 
 pub fn parse_and_validate_project(merged: &MergedSource) -> Result<ast::Project> {
+    let (project, _) = parse_and_validate_project_with_options(merged, SemanticOptions::default())?;
+    Ok(project)
+}
+
+pub fn parse_and_validate_project_with_options(
+    merged: &MergedSource,
+    semantic_options: SemanticOptions,
+) -> Result<(ast::Project, SemanticReport)> {
     let mut lexer = Lexer::new(&merged.source);
     let tokens = lexer.tokenize().map_err(|e| {
         anyhow::anyhow!(format_source_error(
@@ -139,8 +183,9 @@ pub fn parse_and_validate_project(merged: &MergedSource) -> Result<ast::Project>
             merged,
         ))
     })?;
-    semantic_analyze(&project).map_err(|e| anyhow::anyhow!(format_semantic_error(&e.message, merged)))?;
-    Ok(project)
+    let semantic_report = semantic_analyze_with_options(&project, semantic_options)
+        .map_err(|e| anyhow::anyhow!(format_semantic_error(&e.message, merged)))?;
+    Ok((project, semantic_report))
 }
 
 pub fn parse_and_validate_source(source: &str) -> Result<ast::Project> {

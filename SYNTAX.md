@@ -20,6 +20,7 @@ If you pass only `INPUT` with no `OUTPUT`, it still resolves imports, lexes, par
 sbtext-rs INPUT OUTPUT
 sbtext-rs INPUT OUTPUT --no-svg-scale
 sbtext-rs INPUT OUTPUT --python-backend
+sbtext-rs INPUT OUTPUT --allow-unknown-procedures
 sbtext-rs INPUT --emit-merged merged.sbtext
 ```
 
@@ -28,6 +29,7 @@ Flags:
 - `--no-svg-scale`: disables SVG normalization to `64x64`.
 - `--emit-merged PATH`: writes merged source after import resolution.
 - `--python-backend`: uses Python backend instead of native Rust backend (parity mode).
+- `--allow-unknown-procedures`: allows unresolved procedure calls; unknown calls compile as no-op `wait (0)` and emit warnings.
 
 ## 3) Import system
 
@@ -123,6 +125,7 @@ Supported event headers:
 - `when flag clicked`
 - `when this sprite clicked`
 - `when I receive [message]`
+- `when [key_name] key pressed`
 
 Event body is a statement sequence.
 Event `end` is optional in some layouts, but using explicit `end` is recommended for clarity.
@@ -380,7 +383,7 @@ Current semantic checks include:
 - Duplicate list names per target rejected.
 - Unknown variable references rejected.
 - Unknown list references rejected.
-- Unknown local procedure calls rejected.
+- Unknown procedure calls rejected (unless `--allow-unknown-procedures` is enabled).
 - Local call before local definition rejected.
 - Procedure argument count mismatch rejected.
 - Cross-target procedure target/procedure/arg-count validated.

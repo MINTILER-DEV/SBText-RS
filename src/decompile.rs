@@ -177,7 +177,8 @@ fn decompile_target(target: &Value) -> Result<DecompiledTarget> {
             "procedures_definition" => procedure_starts.push(id.clone()),
             "event_whenflagclicked"
             | "event_whenthisspriteclicked"
-            | "event_whenbroadcastreceived" => script_starts.push(id.clone()),
+            | "event_whenbroadcastreceived"
+            | "event_whenkeypressed" => script_starts.push(id.clone()),
             _ => {}
         }
     }
@@ -307,6 +308,12 @@ fn decompile_script(blocks: &Map<String, Value>, hat_id: &str) -> Result<Decompi
             let msg = field_first_string(hat, "BROADCAST_OPTION")
                 .unwrap_or_else(|| "message1".to_string());
             format!("when I receive [{}]", msg)
+        }
+        "event_whenkeypressed" => {
+            let key = field_first_string(hat, "KEY_OPTION")
+                .or_else(|| key_option(blocks, hat))
+                .unwrap_or_else(|| "space".to_string());
+            format!("when [{}] key pressed", key)
         }
         other => format!("# unsupported event opcode: {}", other),
     };
