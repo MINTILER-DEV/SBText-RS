@@ -842,17 +842,18 @@ impl Parser {
 
     fn parse_start_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("start", "Expected 'start'.")?.pos;
-        self.consume_keyword("sound", "Expected 'sound' in 'start sound (...)'.")?;
+        if !self.match_keyword("sound") {
+            return self.parse_keyword_call_stmt(start, "start");
+        }
         let sound = self.parse_wrapped_expression()?;
         Ok(Statement::StartSound { pos: start, sound })
     }
 
     fn parse_play_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("play", "Expected 'play'.")?.pos;
-        self.consume_keyword(
-            "sound",
-            "Expected 'sound' in 'play sound (...) until done'.",
-        )?;
+        if !self.match_keyword("sound") {
+            return self.parse_keyword_call_stmt(start, "play");
+        }
         let sound = self.parse_wrapped_expression()?;
         self.consume_keyword("until", "Expected 'until' in 'play sound ... until done'.")?;
         self.consume_keyword("done", "Expected 'done' in 'play sound ... until done'.")?;
@@ -895,17 +896,57 @@ impl Parser {
 
     fn parse_clear_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("clear", "Expected 'clear'.")?.pos;
-        self.consume_keyword("graphic", "Expected 'graphic' in 'clear graphic effects'.")?;
-        self.consume_keyword("effects", "Expected 'effects' in 'clear graphic effects'.")?;
-        Ok(Statement::ClearGraphicEffects { pos: start })
+        if self.match_keyword("all") {
+            return Ok(Statement::PenClear { pos: start });
+        }
+        if self.match_keyword("graphic") {
+            self.consume_keyword("effects", "Expected 'effects' in 'clear graphic effects'.")?;
+            return Ok(Statement::ClearGraphicEffects { pos: start });
+        }
+        self.parse_keyword_call_stmt(start, "clear")
     }
 
     fn parse_create_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("create", "Expected 'create'.")?.pos;
-        self.consume_keyword("clone", "Expected 'clone' in 'create clone of (...)'.")?;
-        self.consume_keyword("of", "Expected 'of' in 'create clone of (...)'.")?;
+        if !self.match_keyword("clone") {
+            return self.parse_keyword_call_stmt(start, "create");
+        }
+        if !self.match_keyword("of") {
+            return self.parse_keyword_call_stmt(start, "create clone");
+        }
         let target = self.parse_wrapped_expression()?;
         Ok(Statement::CreateCloneOf { pos: start, target })
+    }
+
+    fn parse_keyword_call_stmt(
+        &mut self,
+        start: Position,
+        prefix: &str,
+    ) -> Result<Statement, ParseError> {
+        let mut name = prefix.to_string();
+        while !self.at_end()
+            && !self.check_type(TokenType::Newline)
+            && !self.check_type(TokenType::LParen)
+        {
+            let part = self.current().clone();
+            if !matches!(
+                part.typ,
+                TokenType::Ident | TokenType::Keyword | TokenType::Number | TokenType::Op
+            ) {
+                break;
+            }
+            append_procedure_name_part(&mut name, &part.value);
+            self.advance();
+        }
+        let mut args = Vec::new();
+        while self.check_type(TokenType::LParen) {
+            args.push(self.parse_wrapped_expression()?);
+        }
+        Ok(Statement::ProcedureCall {
+            pos: start,
+            name,
+            args,
+        })
     }
 
     fn parse_pen_stmt(&mut self) -> Result<Statement, ParseError> {

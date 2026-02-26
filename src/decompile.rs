@@ -973,9 +973,49 @@ fn proccode_name(proccode: &str) -> String {
 }
 
 fn broadcast_message(blocks: &Map<String, Value>, block: &Value) -> Option<String> {
-    let menu_id = block_input_block_id(block, "BROADCAST_INPUT")?;
-    let menu_block = blocks.get(&menu_id)?;
-    field_first_string(menu_block, "BROADCAST_OPTION")
+    if let Some(menu_id) = block_input_block_id(block, "BROADCAST_INPUT") {
+        if let Some(menu_block) = blocks.get(&menu_id) {
+            if let Some(name) = field_first_string(menu_block, "BROADCAST_OPTION") {
+                return Some(name);
+            }
+        }
+    }
+    input_menu_literal(block, "BROADCAST_INPUT")
+}
+
+fn input_menu_literal(block: &Value, input_name: &str) -> Option<String> {
+    let input_val = block
+        .get("inputs")
+        .and_then(Value::as_object)
+        .and_then(|m| m.get(input_name))?;
+    if let Some(arr) = input_val.as_array() {
+        for idx in [1usize, 2usize] {
+            let Some(candidate) = arr.get(idx) else {
+                continue;
+            };
+            if let Some(found) = parse_menu_literal_value(candidate) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn parse_menu_literal_value(value: &Value) -> Option<String> {
+    let arr = value.as_array()?;
+    if arr.len() >= 2 {
+        if let Some(code) = arr[0].as_i64() {
+            if matches!(code, 10 | 11) {
+                return arr[1].as_str().map(ToString::to_string);
+            }
+        }
+    }
+    if let Some(first) = arr.first().and_then(Value::as_str) {
+        if !first.is_empty() {
+            return Some(first.to_string());
+        }
+    }
+    None
 }
 
 fn block_input_block_id(block: &Value, input_name: &str) -> Option<String> {
