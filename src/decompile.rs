@@ -382,6 +382,22 @@ fn decompile_statement(
                 value
             ));
         }
+        "data_showvariable" => {
+            let name = field_first_string(block, "VARIABLE").unwrap_or_else(|| "var".to_string());
+            out.push(format!(
+                "{}show variable [{}]",
+                pad,
+                format_bracket_name(&name)
+            ));
+        }
+        "data_hidevariable" => {
+            let name = field_first_string(block, "VARIABLE").unwrap_or_else(|| "var".to_string());
+            out.push(format!(
+                "{}hide variable [{}]",
+                pad,
+                format_bracket_name(&name)
+            ));
+        }
         "motion_movesteps" => {
             let steps = expr_from_input(blocks, block, "STEPS")?;
             out.push(format!("{}move ({}) [steps]", pad, steps));
@@ -412,6 +428,28 @@ fn decompile_statement(
             let y = expr_from_input(blocks, block, "Y")?;
             out.push(format!("{}go to x ({}) y ({})", pad, x, y));
         }
+        "motion_goto" => {
+            let target = motion_target_option(blocks, block, "TO", "TO")
+                .unwrap_or_else(|| "_random_".to_string());
+            out.push(format!("{}go to ({})", pad, quote_str(&target)));
+        }
+        "motion_glidesecstoxy" => {
+            let secs = expr_from_input(blocks, block, "SECS")?;
+            let x = expr_from_input(blocks, block, "X")?;
+            let y = expr_from_input(blocks, block, "Y")?;
+            out.push(format!("{}glide ({}) to x ({}) y ({})", pad, secs, x, y));
+        }
+        "motion_glideto" => {
+            let secs = expr_from_input(blocks, block, "SECS")?;
+            let target = motion_target_option(blocks, block, "TO", "TO")
+                .unwrap_or_else(|| "_random_".to_string());
+            out.push(format!(
+                "{}glide ({}) to ({})",
+                pad,
+                secs,
+                quote_str(&target)
+            ));
+        }
         "motion_changexby" => {
             let v = expr_from_input(blocks, block, "DX")?;
             out.push(format!("{}change x by ({})", pad, v));
@@ -431,6 +469,20 @@ fn decompile_statement(
         "motion_pointindirection" => {
             let v = expr_from_input(blocks, block, "DIRECTION")?;
             out.push(format!("{}point in direction ({})", pad, v));
+        }
+        "motion_pointtowards" => {
+            let target = motion_target_option(blocks, block, "TOWARDS", "TOWARDS")
+                .unwrap_or_else(|| "_mouse_".to_string());
+            out.push(format!("{}point towards ({})", pad, quote_str(&target)));
+        }
+        "motion_setrotationstyle" => {
+            let style =
+                field_first_string(block, "STYLE").unwrap_or_else(|| "all around".to_string());
+            out.push(format!(
+                "{}set rotation style [{}]",
+                pad,
+                format_bracket_name(&style)
+            ));
         }
         "motion_ifonedgebounce" => out.push(format!("{}if on edge bounce", pad)),
         "looks_changesizeby" => {
@@ -452,6 +504,47 @@ fn decompile_statement(
         "looks_switchbackdropto" => {
             let backdrop = expr_from_input(blocks, block, "BACKDROP")?;
             out.push(format!("{}switch backdrop to ({})", pad, backdrop));
+        }
+        "looks_cleargraphiceffects" => out.push(format!("{}clear graphic effects", pad)),
+        "looks_seteffectto" => {
+            let effect = field_first_string(block, "EFFECT").unwrap_or_else(|| "ghost".to_string());
+            let value = expr_from_input(blocks, block, "VALUE")?;
+            out.push(format!(
+                "{}set graphic effect [{}] to ({})",
+                pad,
+                format_bracket_name(&effect),
+                value
+            ));
+        }
+        "looks_changeeffectby" => {
+            let effect = field_first_string(block, "EFFECT").unwrap_or_else(|| "ghost".to_string());
+            let value = expr_from_input(blocks, block, "CHANGE")?;
+            out.push(format!(
+                "{}change graphic effect [{}] by ({})",
+                pad,
+                format_bracket_name(&effect),
+                value
+            ));
+        }
+        "looks_gotofrontback" => {
+            let layer =
+                field_first_string(block, "FRONT_BACK").unwrap_or_else(|| "front".to_string());
+            out.push(format!(
+                "{}go to [{}] layer",
+                pad,
+                format_bracket_name(&layer)
+            ));
+        }
+        "looks_goforwardbackwardlayers" => {
+            let direction = field_first_string(block, "FORWARD_BACKWARD")
+                .unwrap_or_else(|| "forward".to_string());
+            let num = expr_from_input(blocks, block, "NUM")?;
+            out.push(format!(
+                "{}go [{}] ({}) layers",
+                pad,
+                format_bracket_name(&direction),
+                num
+            ));
         }
         "control_wait" => {
             let v = expr_from_input(blocks, block, "DURATION")?;
@@ -531,11 +624,43 @@ fn decompile_statement(
                 field_first_string(block, "STOP_OPTION").unwrap_or_else(|| "all".to_string());
             out.push(format!("{}stop ({})", pad, quote_str(&option)));
         }
+        "control_create_clone_of" => {
+            let target = clone_option(blocks, block).unwrap_or_else(|| "_myself_".to_string());
+            out.push(format!("{}create clone of ({})", pad, quote_str(&target)));
+        }
+        "control_delete_this_clone" => out.push(format!("{}delete this clone", pad)),
         "sensing_askandwait" => {
             let q = expr_from_input(blocks, block, "QUESTION")?;
             out.push(format!("{}ask ({})", pad, q));
         }
         "sensing_resettimer" => out.push(format!("{}reset timer", pad)),
+        "sound_play" => {
+            let sound = sound_menu_option(blocks, block).unwrap_or_else(|| "sound".to_string());
+            out.push(format!("{}start sound ({})", pad, quote_str(&sound)));
+        }
+        "sound_playuntildone" => {
+            let sound = sound_menu_option(blocks, block).unwrap_or_else(|| "sound".to_string());
+            out.push(format!(
+                "{}play sound ({}) until done",
+                pad,
+                quote_str(&sound)
+            ));
+        }
+        "sound_stopallsounds" => out.push(format!("{}stop all sounds", pad)),
+        "sound_seteffectto" => {
+            let effect = field_first_string(block, "EFFECT").unwrap_or_else(|| "pitch".to_string());
+            let value = expr_from_input(blocks, block, "VALUE")?;
+            out.push(format!(
+                "{}set sound effect [{}] to ({})",
+                pad,
+                format_bracket_name(&effect),
+                value
+            ));
+        }
+        "sound_setvolumeto" => {
+            let value = expr_from_input(blocks, block, "VOLUME")?;
+            out.push(format!("{}set volume to ({})", pad, value));
+        }
         "data_addtolist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             let item = expr_from_input(blocks, block, "ITEM")?;
@@ -558,7 +683,11 @@ fn decompile_statement(
         }
         "data_deletealloflist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
-            out.push(format!("{}delete all of [{}]", pad, format_bracket_name(&list)));
+            out.push(format!(
+                "{}delete all of [{}]",
+                pad,
+                format_bracket_name(&list)
+            ));
         }
         "data_insertatlist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
@@ -779,6 +908,29 @@ fn key_option(blocks: &Map<String, Value>, block: &Value) -> Option<String> {
     let menu_id = block_input_block_id(block, "KEY_OPTION")?;
     let menu_block = blocks.get(&menu_id)?;
     field_first_string(menu_block, "KEY_OPTION")
+}
+
+fn motion_target_option(
+    blocks: &Map<String, Value>,
+    block: &Value,
+    input_name: &str,
+    field_name: &str,
+) -> Option<String> {
+    let menu_id = block_input_block_id(block, input_name)?;
+    let menu_block = blocks.get(&menu_id)?;
+    field_first_string(menu_block, field_name)
+}
+
+fn sound_menu_option(blocks: &Map<String, Value>, block: &Value) -> Option<String> {
+    let menu_id = block_input_block_id(block, "SOUND_MENU")?;
+    let menu_block = blocks.get(&menu_id)?;
+    field_first_string(menu_block, "SOUND_MENU")
+}
+
+fn clone_option(blocks: &Map<String, Value>, block: &Value) -> Option<String> {
+    let menu_id = block_input_block_id(block, "CLONE_OPTION")?;
+    let menu_block = blocks.get(&menu_id)?;
+    field_first_string(menu_block, "CLONE_OPTION")
 }
 
 fn pen_color_param(blocks: &Map<String, Value>, block: &Value) -> Option<String> {

@@ -1,5 +1,6 @@
 use crate::ast::{
-    CostumeDecl, EventScript, EventType, Expr, ListDecl, Position, Procedure, Project, Statement, Target, VariableDecl,
+    CostumeDecl, EventScript, EventType, Expr, ListDecl, Position, Procedure, Project, Statement,
+    Target, VariableDecl,
 };
 use crate::lexer::{Token, TokenType};
 use std::collections::HashSet;
@@ -14,7 +15,11 @@ pub struct ParseError {
 
 impl Display for ParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (line {}, column {})", self.message, self.pos.line, self.pos.column)
+        write!(
+            f,
+            "{} (line {}, column {})",
+            self.message, self.pos.line, self.pos.column
+        )
     }
 }
 
@@ -51,7 +56,10 @@ impl Parser {
                 pos: start,
             });
         }
-        Ok(Project { pos: start, targets })
+        Ok(Project {
+            pos: start,
+            targets,
+        })
     }
 
     fn parse_sprite(&mut self, pos: Position) -> Result<Target, ParseError> {
@@ -69,7 +77,12 @@ impl Parser {
         self.parse_target_body(name, true, pos)
     }
 
-    fn parse_target_body(&mut self, name: String, is_stage: bool, pos: Position) -> Result<Target, ParseError> {
+    fn parse_target_body(
+        &mut self,
+        name: String,
+        is_stage: bool,
+        pos: Position,
+    ) -> Result<Target, ParseError> {
         let mut target = Target {
             pos,
             name,
@@ -94,18 +107,25 @@ impl Parser {
             if self.match_keyword("var") {
                 let prev = self.previous().pos;
                 let var_name = self.parse_decl_name_token()?;
-                target.variables.push(VariableDecl { pos: prev, name: var_name });
+                target.variables.push(VariableDecl {
+                    pos: prev,
+                    name: var_name,
+                });
                 continue;
             }
             if self.match_keyword("list") {
                 let prev = self.previous().pos;
                 let list_name = self.parse_decl_name_token()?;
-                target.lists.push(ListDecl { pos: prev, name: list_name });
+                target.lists.push(ListDecl {
+                    pos: prev,
+                    name: list_name,
+                });
                 continue;
             }
             if self.match_keyword("costume") {
                 let prev = self.previous().pos;
-                let path_token = self.consume_type(TokenType::String, "Expected costume path string.")?;
+                let path_token =
+                    self.consume_type(TokenType::String, "Expected costume path string.")?;
                 target.costumes.push(CostumeDecl {
                     pos: prev,
                     path: path_token.value,
@@ -122,7 +142,9 @@ impl Parser {
                 target.scripts.push(self.parse_event_script(prev)?);
                 continue;
             }
-            return self.error_here("Expected 'var', 'list', 'costume', 'define', 'when', or 'end' inside target.");
+            return self.error_here(
+                "Expected 'var', 'list', 'costume', 'define', 'when', or 'end' inside target.",
+            );
         }
         Ok(target)
     }
@@ -144,7 +166,8 @@ impl Parser {
             self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
             params.push(param);
         }
-        run_without_screen_refresh = run_without_screen_refresh || self.try_parse_run_without_screen_refresh();
+        run_without_screen_refresh =
+            run_without_screen_refresh || self.try_parse_run_without_screen_refresh();
         self.skip_newlines();
         let body = self.parse_statement_block(&["end"], false)?;
         self.consume_keyword("end", "Expected 'end' to close procedure definition.")?;
@@ -178,7 +201,10 @@ impl Parser {
             EventType::WhenFlagClicked
         } else if self.match_keyword("this") {
             self.consume_keyword("sprite", "Expected 'sprite' in 'when this sprite clicked'.")?;
-            self.consume_keyword("clicked", "Expected 'clicked' in 'when this sprite clicked'.")?;
+            self.consume_keyword(
+                "clicked",
+                "Expected 'clicked' in 'when this sprite clicked'.",
+            )?;
             EventType::WhenThisSpriteClicked
         } else if self.match_keyword("i") {
             self.consume_keyword("receive", "Expected 'receive' after 'when I'.")?;
@@ -191,14 +217,23 @@ impl Parser {
             return self.error_here("Unknown event header after 'when'.");
         };
         self.skip_newlines();
-        let body = self.parse_statement_block(&["when", "define", "var", "list", "costume", "end"], false)?;
+        let body = self
+            .parse_statement_block(&["when", "define", "var", "list", "costume", "end"], false)?;
         if self.check_keyword("end") && self.looks_like_event_end() {
             self.advance();
         }
-        Ok(EventScript { pos, event_type, body })
+        Ok(EventScript {
+            pos,
+            event_type,
+            body,
+        })
     }
 
-    fn parse_statement_block(&mut self, until_keywords: &[&str], consume_until: bool) -> Result<Vec<Statement>, ParseError> {
+    fn parse_statement_block(
+        &mut self,
+        until_keywords: &[&str],
+        consume_until: bool,
+    ) -> Result<Vec<Statement>, ParseError> {
         let end_set: HashSet<&str> = until_keywords.iter().copied().collect();
         let mut statements = Vec::new();
         loop {
@@ -236,6 +271,9 @@ impl Parser {
         }
         if self.check_keyword("think") {
             return self.parse_think_stmt();
+        }
+        if self.check_keyword("glide") {
+            return self.parse_glide_stmt();
         }
         if self.check_keyword("repeat") {
             return self.parse_repeat_stmt();
@@ -285,8 +323,20 @@ impl Parser {
         if self.check_keyword("ask") {
             return self.parse_ask_stmt();
         }
+        if self.check_keyword("start") {
+            return self.parse_start_stmt();
+        }
+        if self.check_keyword("play") {
+            return self.parse_play_stmt();
+        }
         if self.check_keyword("reset") {
             return self.parse_reset_stmt();
+        }
+        if self.check_keyword("clear") {
+            return self.parse_clear_stmt();
+        }
+        if self.check_keyword("create") {
+            return self.parse_create_stmt();
         }
         if self.check_keyword("pen") {
             return self.parse_pen_stmt();
@@ -319,7 +369,9 @@ impl Parser {
     }
 
     fn parse_broadcast_stmt(&mut self) -> Result<Statement, ParseError> {
-        let start = self.consume_keyword("broadcast", "Expected 'broadcast'.")?.pos;
+        let start = self
+            .consume_keyword("broadcast", "Expected 'broadcast'.")?
+            .pos;
         let wait = if self.match_keyword("and") {
             self.consume_keyword("wait", "Expected 'wait' after 'broadcast and'.")?;
             true
@@ -331,9 +383,15 @@ impl Parser {
             return self.error_here("Broadcast message cannot be empty.");
         }
         if wait {
-            return Ok(Statement::BroadcastAndWait { pos: start, message });
+            return Ok(Statement::BroadcastAndWait {
+                pos: start,
+                message,
+            });
         }
-        Ok(Statement::Broadcast { pos: start, message })
+        Ok(Statement::Broadcast {
+            pos: start,
+            message,
+        })
     }
 
     fn parse_set_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -353,13 +411,58 @@ impl Parser {
             let value = self.parse_wrapped_expression()?;
             return Ok(Statement::SetSizeTo { pos: start, value });
         }
+        if self.match_keyword("rotation") {
+            self.consume_keyword("style", "Expected 'style' in 'set rotation style ...'.")?;
+            let style = self.parse_bracket_text()?;
+            if style.is_empty() {
+                return self.error_here("Rotation style cannot be empty.");
+            }
+            return Ok(Statement::SetRotationStyle { pos: start, style });
+        }
+        if self.match_keyword("graphic") {
+            self.consume_keyword("effect", "Expected 'effect' in 'set graphic effect ...'.")?;
+            let effect = self.parse_bracket_text()?;
+            if effect.is_empty() {
+                return self.error_here("Graphic effect name cannot be empty.");
+            }
+            self.consume_keyword("to", "Expected 'to' in 'set graphic effect ... to ...'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::SetGraphicEffectTo {
+                pos: start,
+                effect,
+                value,
+            });
+        }
+        if self.match_keyword("sound") {
+            self.consume_keyword("effect", "Expected 'effect' in 'set sound effect ...'.")?;
+            let effect = self.parse_bracket_text()?;
+            if effect.is_empty() {
+                return self.error_here("Sound effect name cannot be empty.");
+            }
+            self.consume_keyword("to", "Expected 'to' in 'set sound effect ... to ...'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::SetSoundEffectTo {
+                pos: start,
+                effect,
+                value,
+            });
+        }
+        if self.match_keyword("volume") {
+            self.consume_keyword("to", "Expected 'to' in 'set volume to ...'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::SetVolumeTo { pos: start, value });
+        }
         if self.match_keyword("pen") {
             return self.parse_set_pen_stmt(start);
         }
         let var_name = self.parse_variable_field_name()?;
         self.consume_keyword("to", "Expected 'to' in set statement.")?;
         let value = self.parse_wrapped_expression()?;
-        Ok(Statement::SetVar { pos: start, var_name, value })
+        Ok(Statement::SetVar {
+            pos: start,
+            var_name,
+            value,
+        })
     }
 
     fn parse_change_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -379,13 +482,34 @@ impl Parser {
             let value = self.parse_wrapped_expression()?;
             return Ok(Statement::ChangeSizeBy { pos: start, value });
         }
+        if self.match_keyword("graphic") {
+            self.consume_keyword(
+                "effect",
+                "Expected 'effect' in 'change graphic effect ...'.",
+            )?;
+            let effect = self.parse_bracket_text()?;
+            if effect.is_empty() {
+                return self.error_here("Graphic effect name cannot be empty.");
+            }
+            self.consume_keyword("by", "Expected 'by' in 'change graphic effect ... by ...'.")?;
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Statement::ChangeGraphicEffectBy {
+                pos: start,
+                effect,
+                value,
+            });
+        }
         if self.match_keyword("pen") {
             return self.parse_change_pen_stmt(start);
         }
         let var_name = self.parse_variable_field_name()?;
         self.consume_keyword("by", "Expected 'by' in change statement.")?;
         let delta = self.parse_wrapped_expression()?;
-        Ok(Statement::ChangeVar { pos: start, var_name, delta })
+        Ok(Statement::ChangeVar {
+            pos: start,
+            var_name,
+            delta,
+        })
     }
 
     fn parse_move_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -408,7 +532,8 @@ impl Parser {
             if !self.match_keyword("seconds") && self.check_type(TokenType::LBracket) {
                 let unit = self.parse_bracket_text()?;
                 if !unit.eq_ignore_ascii_case("seconds") {
-                    return self.error_here("Expected 'seconds' or '[seconds]' after say duration.");
+                    return self
+                        .error_here("Expected 'seconds' or '[seconds]' after say duration.");
                 }
             }
             return Ok(Statement::SayForSeconds {
@@ -417,13 +542,42 @@ impl Parser {
                 duration,
             });
         }
-        Ok(Statement::Say { pos: start, message })
+        Ok(Statement::Say {
+            pos: start,
+            message,
+        })
     }
 
     fn parse_think_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("think", "Expected 'think'.")?.pos;
         let message = self.parse_wrapped_expression()?;
-        Ok(Statement::Think { pos: start, message })
+        Ok(Statement::Think {
+            pos: start,
+            message,
+        })
+    }
+
+    fn parse_glide_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("glide", "Expected 'glide'.")?.pos;
+        let duration = self.parse_wrapped_expression()?;
+        self.consume_keyword("to", "Expected 'to' in glide statement.")?;
+        if self.match_keyword("x") {
+            let x = self.parse_wrapped_expression()?;
+            self.consume_keyword("y", "Expected 'y' in 'glide (...) to x (...) y (...)'.")?;
+            let y = self.parse_wrapped_expression()?;
+            return Ok(Statement::GlideToXY {
+                pos: start,
+                duration,
+                x,
+                y,
+            });
+        }
+        let target = self.parse_wrapped_expression()?;
+        Ok(Statement::GlideToTarget {
+            pos: start,
+            duration,
+            target,
+        })
     }
 
     fn parse_repeat_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -443,7 +597,11 @@ impl Parser {
         self.skip_newlines();
         let body = self.parse_statement_block(&["end"], false)?;
         self.consume_keyword("end", "Expected 'end' to close repeat block.")?;
-        Ok(Statement::Repeat { pos: start, times, body })
+        Ok(Statement::Repeat {
+            pos: start,
+            times,
+            body,
+        })
     }
 
     fn parse_for_each_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -500,40 +658,94 @@ impl Parser {
         let start = self.consume_keyword("turn", "Expected 'turn'.")?.pos;
         if self.match_keyword("right") {
             let degrees = self.parse_wrapped_expression()?;
-            return Ok(Statement::TurnRight { pos: start, degrees });
+            return Ok(Statement::TurnRight {
+                pos: start,
+                degrees,
+            });
         }
         if self.match_keyword("left") {
             let degrees = self.parse_wrapped_expression()?;
-            return Ok(Statement::TurnLeft { pos: start, degrees });
+            return Ok(Statement::TurnLeft {
+                pos: start,
+                degrees,
+            });
         }
         self.error_here("Expected 'right' or 'left' after 'turn'.")
     }
 
     fn parse_go_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("go", "Expected 'go'.")?.pos;
-        self.consume_keyword("to", "Expected 'to' after 'go'.")?;
-        self.consume_keyword("x", "Expected 'x' in 'go to x ... y ...'.")?;
-        let x = self.parse_wrapped_expression()?;
-        self.consume_keyword("y", "Expected 'y' in 'go to x ... y ...'.")?;
-        let y = self.parse_wrapped_expression()?;
-        Ok(Statement::GoToXY { pos: start, x, y })
+        if self.match_keyword("to") {
+            if self.match_keyword("x") {
+                let x = self.parse_wrapped_expression()?;
+                self.consume_keyword("y", "Expected 'y' in 'go to x ... y ...'.")?;
+                let y = self.parse_wrapped_expression()?;
+                return Ok(Statement::GoToXY { pos: start, x, y });
+            }
+            if self.check_type(TokenType::LBracket) {
+                let layer = self.parse_bracket_text()?;
+                self.consume_keyword("layer", "Expected 'layer' in 'go to [front/back] layer'.")?;
+                return Ok(Statement::GoToLayer { pos: start, layer });
+            }
+            let target = self.parse_wrapped_expression()?;
+            return Ok(Statement::GoToTarget { pos: start, target });
+        }
+        if self.check_type(TokenType::LBracket) {
+            let direction = self.parse_bracket_text()?;
+            let layers = self.parse_wrapped_expression()?;
+            if !self.match_keyword("layers") {
+                self.consume_keyword(
+                    "layer",
+                    "Expected 'layer' or 'layers' after go-layer count.",
+                )?;
+            }
+            return Ok(Statement::GoLayers {
+                pos: start,
+                direction,
+                layers,
+            });
+        }
+        self.error_here("Expected 'to' or a [forward/backward] direction after 'go'.")
     }
 
     fn parse_point_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("point", "Expected 'point'.")?.pos;
-        self.consume_keyword("in", "Expected 'in' after 'point'.")?;
-        self.consume_keyword("direction", "Expected 'direction' after 'point in'.")?;
-        let direction = self.parse_wrapped_expression()?;
-        Ok(Statement::PointInDirection { pos: start, direction })
+        if self.match_keyword("in") {
+            self.consume_keyword("direction", "Expected 'direction' after 'point in'.")?;
+            let direction = self.parse_wrapped_expression()?;
+            return Ok(Statement::PointInDirection {
+                pos: start,
+                direction,
+            });
+        }
+        if self.match_keyword("towards") {
+            let target = self.parse_wrapped_expression()?;
+            return Ok(Statement::PointTowards { pos: start, target });
+        }
+        self.error_here("Expected 'in direction' or 'towards' after 'point'.")
     }
 
     fn parse_show_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("show", "Expected 'show'.")?.pos;
+        if self.match_keyword("variable") {
+            let var_name = self.parse_variable_field_name()?;
+            return Ok(Statement::ShowVariable {
+                pos: start,
+                var_name,
+            });
+        }
         Ok(Statement::Show { pos: start })
     }
 
     fn parse_hide_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("hide", "Expected 'hide'.")?.pos;
+        if self.match_keyword("variable") {
+            let var_name = self.parse_variable_field_name()?;
+            return Ok(Statement::HideVariable {
+                pos: start,
+                var_name,
+            });
+        }
         Ok(Statement::Hide { pos: start })
     }
 
@@ -573,13 +785,23 @@ impl Parser {
         let start = self.consume_keyword("wait", "Expected 'wait'.")?.pos;
         if self.match_keyword("until") {
             let condition = self.parse_condition_until_newline(start, "wait until")?;
-            return Ok(Statement::WaitUntil { pos: start, condition });
+            return Ok(Statement::WaitUntil {
+                pos: start,
+                condition,
+            });
         }
         let duration = self.parse_wrapped_expression()?;
-        Ok(Statement::Wait { pos: start, duration })
+        Ok(Statement::Wait {
+            pos: start,
+            duration,
+        })
     }
 
-    fn parse_condition_until_newline(&mut self, start: Position, context: &str) -> Result<Expr, ParseError> {
+    fn parse_condition_until_newline(
+        &mut self,
+        start: Position,
+        context: &str,
+    ) -> Result<Expr, ParseError> {
         let mut condition_tokens = self.collect_tokens_until_newline()?;
         if condition_tokens.is_empty() {
             return Err(ParseError {
@@ -601,6 +823,10 @@ impl Parser {
 
     fn parse_stop_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("stop", "Expected 'stop'.")?.pos;
+        if self.match_keyword("all") {
+            self.consume_keyword("sounds", "Expected 'sounds' in 'stop all sounds'.")?;
+            return Ok(Statement::StopAllSounds { pos: start });
+        }
         let option = self.parse_wrapped_expression()?;
         Ok(Statement::Stop { pos: start, option })
     }
@@ -608,7 +834,29 @@ impl Parser {
     fn parse_ask_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("ask", "Expected 'ask'.")?.pos;
         let question = self.parse_wrapped_expression()?;
-        Ok(Statement::Ask { pos: start, question })
+        Ok(Statement::Ask {
+            pos: start,
+            question,
+        })
+    }
+
+    fn parse_start_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("start", "Expected 'start'.")?.pos;
+        self.consume_keyword("sound", "Expected 'sound' in 'start sound (...)'.")?;
+        let sound = self.parse_wrapped_expression()?;
+        Ok(Statement::StartSound { pos: start, sound })
+    }
+
+    fn parse_play_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("play", "Expected 'play'.")?.pos;
+        self.consume_keyword(
+            "sound",
+            "Expected 'sound' in 'play sound (...) until done'.",
+        )?;
+        let sound = self.parse_wrapped_expression()?;
+        self.consume_keyword("until", "Expected 'until' in 'play sound ... until done'.")?;
+        self.consume_keyword("done", "Expected 'done' in 'play sound ... until done'.")?;
+        Ok(Statement::PlaySoundUntilDone { pos: start, sound })
     }
 
     fn parse_reset_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -618,7 +866,10 @@ impl Parser {
         }
 
         let mut name = "reset".to_string();
-        while !self.at_end() && !self.check_type(TokenType::Newline) && !self.check_type(TokenType::LParen) {
+        while !self.at_end()
+            && !self.check_type(TokenType::Newline)
+            && !self.check_type(TokenType::LParen)
+        {
             let part = self.current().clone();
             if !matches!(
                 part.typ,
@@ -640,6 +891,21 @@ impl Parser {
             name,
             args,
         })
+    }
+
+    fn parse_clear_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("clear", "Expected 'clear'.")?.pos;
+        self.consume_keyword("graphic", "Expected 'graphic' in 'clear graphic effects'.")?;
+        self.consume_keyword("effects", "Expected 'effects' in 'clear graphic effects'.")?;
+        Ok(Statement::ClearGraphicEffects { pos: start })
+    }
+
+    fn parse_create_stmt(&mut self) -> Result<Statement, ParseError> {
+        let start = self.consume_keyword("create", "Expected 'create'.")?.pos;
+        self.consume_keyword("clone", "Expected 'clone' in 'create clone of (...)'.")?;
+        self.consume_keyword("of", "Expected 'of' in 'create clone of (...)'.")?;
+        let target = self.parse_wrapped_expression()?;
+        Ok(Statement::CreateCloneOf { pos: start, target })
     }
 
     fn parse_pen_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -674,7 +940,11 @@ impl Parser {
         if is_pen_color_param(param.as_str()) {
             self.consume_keyword("to", "Expected 'to' in 'set pen <param> to'.")?;
             let value = self.parse_wrapped_expression()?;
-            return Ok(Statement::SetPenColorParamTo { pos: start, param, value });
+            return Ok(Statement::SetPenColorParamTo {
+                pos: start,
+                param,
+                value,
+            });
         }
         self.error_here("Unknown pen parameter. Use size/color/saturation/brightness/transparency.")
     }
@@ -689,7 +959,11 @@ impl Parser {
         if is_pen_color_param(param.as_str()) {
             self.consume_keyword("by", "Expected 'by' in 'change pen <param> by'.")?;
             let value = self.parse_wrapped_expression()?;
-            return Ok(Statement::ChangePenColorParamBy { pos: start, param, value });
+            return Ok(Statement::ChangePenColorParamBy {
+                pos: start,
+                param,
+                value,
+            });
         }
         self.error_here("Unknown pen parameter. Use size/color/saturation/brightness/transparency.")
     }
@@ -712,20 +986,35 @@ impl Parser {
         let item = self.parse_wrapped_expression()?;
         self.consume_keyword("to", "Expected 'to' in list add statement.")?;
         let list_name = self.parse_list_field_name()?;
-        Ok(Statement::AddToList { pos: start, list_name, item })
+        Ok(Statement::AddToList {
+            pos: start,
+            list_name,
+            item,
+        })
     }
 
     fn parse_delete_list_stmt(&mut self) -> Result<Statement, ParseError> {
         let start = self.consume_keyword("delete", "Expected 'delete'.")?.pos;
+        if self.match_keyword("this") {
+            self.consume_keyword("clone", "Expected 'clone' in 'delete this clone'.")?;
+            return Ok(Statement::DeleteThisClone { pos: start });
+        }
         if self.match_keyword("all") {
             self.consume_keyword("of", "Expected 'of' in 'delete all of [list]'.")?;
             let list_name = self.parse_list_field_name()?;
-            return Ok(Statement::DeleteAllOfList { pos: start, list_name });
+            return Ok(Statement::DeleteAllOfList {
+                pos: start,
+                list_name,
+            });
         }
         let index = self.parse_wrapped_expression()?;
         self.consume_keyword("of", "Expected 'of' in list delete statement.")?;
         let list_name = self.parse_list_field_name()?;
-        Ok(Statement::DeleteOfList { pos: start, list_name, index })
+        Ok(Statement::DeleteOfList {
+            pos: start,
+            list_name,
+            index,
+        })
     }
 
     fn parse_insert_list_stmt(&mut self) -> Result<Statement, ParseError> {
@@ -813,7 +1102,10 @@ impl Parser {
             name = token.value.clone();
             self.advance();
         } else {
-            while !self.at_end() && !self.check_type(TokenType::Newline) && !self.check_type(TokenType::LParen) {
+            while !self.at_end()
+                && !self.check_type(TokenType::Newline)
+                && !self.check_type(TokenType::LParen)
+            {
                 let part = self.current().clone();
                 if !matches!(
                     part.typ,
@@ -867,7 +1159,11 @@ impl Parser {
         Ok(expr)
     }
 
-    fn parse_expression(&mut self, stop_types: &[TokenType], min_precedence: i32) -> Result<Expr, ParseError> {
+    fn parse_expression(
+        &mut self,
+        stop_types: &[TokenType],
+        min_precedence: i32,
+    ) -> Result<Expr, ParseError> {
         let mut left = self.parse_unary(stop_types)?;
         loop {
             let token = self.current().clone();
@@ -1004,7 +1300,10 @@ impl Parser {
         if token.typ == TokenType::Ident {
             if self.peek().typ == TokenType::LParen {
                 return Err(ParseError {
-                    message: format!("Procedure call '{}' cannot appear inside an expression.", token.value),
+                    message: format!(
+                        "Procedure call '{}' cannot appear inside an expression.",
+                        token.value
+                    ),
                     pos: token.pos,
                 });
             }
@@ -1082,13 +1381,18 @@ impl Parser {
         self.consume_keyword("of", "Expected 'of' in 'length of ...'.")?;
         if self.check_type(TokenType::LBracket) {
             let list_name = self.parse_list_field_name()?;
-            return Ok(Expr::ListLength { pos: start, list_name });
+            return Ok(Expr::ListLength {
+                pos: start,
+                list_name,
+            });
         }
         self.error_here("Expected list reference after 'length of'.")
     }
 
     fn parse_contents_expr(&mut self) -> Result<Expr, ParseError> {
-        let start = self.consume_keyword("contents", "Expected 'contents'.")?.pos;
+        let start = self
+            .consume_keyword("contents", "Expected 'contents'.")?
+            .pos;
         self.consume_keyword("of", "Expected 'of' in 'contents of ...'.")?;
         if self.check_type(TokenType::LBracket) {
             let list_name = self.parse_list_field_name()?;
@@ -1116,7 +1420,9 @@ impl Parser {
     }
 
     fn parse_math_func_expr(&mut self, op: &str) -> Result<Expr, ParseError> {
-        let start = self.consume_keyword(op, format!("Expected '{}'.", op).as_str())?.pos;
+        let start = self
+            .consume_keyword(op, format!("Expected '{}'.", op).as_str())?
+            .pos;
         let value = self.parse_wrapped_expression()?;
         Ok(Expr::MathFunc {
             pos: start,
@@ -1255,7 +1561,10 @@ impl Parser {
 
     fn parse_decl_name_token(&mut self) -> Result<String, ParseError> {
         let token = self.current().clone();
-        if token.typ == TokenType::Ident || token.typ == TokenType::String || token.typ == TokenType::Keyword {
+        if token.typ == TokenType::Ident
+            || token.typ == TokenType::String
+            || token.typ == TokenType::Keyword
+        {
             self.advance();
             return Ok(token.value);
         }

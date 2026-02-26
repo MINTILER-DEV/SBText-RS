@@ -1,5 +1,6 @@
 use crate::ast::{
-    EventScript, EventType, Expr, ListDecl, Position, Procedure, Project, Statement, Target, VariableDecl,
+    EventScript, EventType, Expr, ListDecl, Position, Procedure, Project, Statement, Target,
+    VariableDecl,
 };
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
@@ -11,8 +12,10 @@ use std::path::Path;
 use xmltree::{Element, XMLNode};
 use zip::write::SimpleFileOptions;
 
-const DEFAULT_STAGE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
-const DEFAULT_SPRITE_SVG: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
+const DEFAULT_STAGE_SVG: &str =
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
+const DEFAULT_SPRITE_SVG: &str =
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1" viewBox="0 0 1 1"></svg>"##;
 const DEFAULT_SVG_TARGET_SIZE: f64 = 64.0;
 
 type CodegenProgressCallback<'a> = dyn FnMut(usize, usize, &str) + 'a;
@@ -28,7 +31,12 @@ impl Default for CodegenOptions {
     }
 }
 
-pub fn write_sb3(project: &Project, source_dir: &Path, output_path: &Path, options: CodegenOptions) -> Result<()> {
+pub fn write_sb3(
+    project: &Project,
+    source_dir: &Path,
+    output_path: &Path,
+    options: CodegenOptions,
+) -> Result<()> {
     write_sb3_with_progress(
         project,
         source_dir,
@@ -56,7 +64,11 @@ where
     Ok(())
 }
 
-pub fn build_sb3_bytes(project: &Project, source_dir: &Path, options: CodegenOptions) -> Result<Vec<u8>> {
+pub fn build_sb3_bytes(
+    project: &Project,
+    source_dir: &Path,
+    options: CodegenOptions,
+) -> Result<Vec<u8>> {
     build_sb3_bytes_with_progress(
         project,
         source_dir,
@@ -265,10 +277,9 @@ impl<'a> ProjectBuilder<'a> {
         }
         if target.is_stage {
             for (var_lower, var_id) in &self.global_var_ids {
-                let var_name = self
-                    .global_var_names
-                    .get(var_lower)
-                    .ok_or_else(|| anyhow!("Missing generated global var name for '{}'.", var_lower))?;
+                let var_name = self.global_var_names.get(var_lower).ok_or_else(|| {
+                    anyhow!("Missing generated global var name for '{}'.", var_lower)
+                })?;
                 variables_json.insert(var_id.clone(), json!([var_name, 0]));
             }
         }
@@ -382,7 +393,10 @@ impl<'a> ProjectBuilder<'a> {
         Ok(target_json)
     }
 
-    fn build_procedure_signatures(&mut self, target: &Target) -> HashMap<String, ProcedureSignature> {
+    fn build_procedure_signatures(
+        &mut self,
+        target: &Target,
+    ) -> HashMap<String, ProcedureSignature> {
         let mut signatures = HashMap::new();
         for procedure in &target.procedures {
             let arg_ids = procedure
@@ -390,7 +404,12 @@ impl<'a> ProjectBuilder<'a> {
                 .iter()
                 .map(|_| self.new_id("arg"))
                 .collect::<Vec<_>>();
-            let placeholders = procedure.params.iter().map(|_| "%s").collect::<Vec<_>>().join(" ");
+            let placeholders = procedure
+                .params
+                .iter()
+                .map(|_| "%s")
+                .collect::<Vec<_>>()
+                .join(" ");
             let proccode = if placeholders.is_empty() {
                 procedure.name.clone()
             } else {
@@ -429,7 +448,11 @@ impl<'a> ProjectBuilder<'a> {
             for procedure in &target.procedures {
                 local_procs.insert(
                     format!("{}.{}", target_lower, procedure.name.to_lowercase()),
-                    (target.name.clone(), procedure.name.clone(), procedure.params.len()),
+                    (
+                        target.name.clone(),
+                        procedure.name.clone(),
+                        procedure.params.len(),
+                    ),
                 );
             }
         }
@@ -462,8 +485,14 @@ impl<'a> ProjectBuilder<'a> {
                         continue;
                     }
                     if let Some((target_name, proc_name)) = split_qualified(name) {
-                        let key = format!("{}.{}", target_name.to_lowercase(), proc_name.to_lowercase());
-                        let Some((_target_display, proc_display, expected_args)) = local_procs.get(&key) else {
+                        let key = format!(
+                            "{}.{}",
+                            target_name.to_lowercase(),
+                            proc_name.to_lowercase()
+                        );
+                        let Some((_target_display, proc_display, expected_args)) =
+                            local_procs.get(&key)
+                        else {
                             continue;
                         };
                         if *expected_args != args.len() {
@@ -583,7 +612,13 @@ impl<'a> ProjectBuilder<'a> {
             .remote_calls
             .iter()
             .find(|s| s.callee_target_lower == target_lower && s.procedure_lower == proc_lower)
-            .ok_or_else(|| anyhow!("Unknown remote procedure '{}.{}'.", callee_target, callee_proc))?;
+            .ok_or_else(|| {
+                anyhow!(
+                    "Unknown remote procedure '{}.{}'.",
+                    callee_target,
+                    callee_proc
+                )
+            })?;
         if spec.arg_var_names.len() != arg_count {
             bail!(
                 "Remote procedure '{}.{}' expects {} args, got {}.",
@@ -743,23 +778,23 @@ impl<'a> ProjectBuilder<'a> {
         blocks.insert(
             prototype_id.clone(),
             json!({
-                "opcode": "procedures_prototype",
-                "next": Value::Null,
-                "parent": definition_id.clone(),
-                "inputs": prototype_inputs,
-                "fields": {},
-                "shadow": true,
-                "topLevel": false,
-                    "mutation": {
-                        "tagName": "mutation",
-                        "children": [],
-                        "proccode": signature.proccode,
-                        "argumentids": serde_json::to_string(&signature.arg_ids)?,
-                        "argumentnames": serde_json::to_string(&signature.params)?,
-                        "argumentdefaults": serde_json::to_string(&vec![""; signature.params.len()])?,
-                        "warp": if signature.warp { "true" } else { "false" }
-                    }
-                }),
+            "opcode": "procedures_prototype",
+            "next": Value::Null,
+            "parent": definition_id.clone(),
+            "inputs": prototype_inputs,
+            "fields": {},
+            "shadow": true,
+            "topLevel": false,
+                "mutation": {
+                    "tagName": "mutation",
+                    "children": [],
+                    "proccode": signature.proccode,
+                    "argumentids": serde_json::to_string(&signature.arg_ids)?,
+                    "argumentnames": serde_json::to_string(&signature.params)?,
+                    "argumentdefaults": serde_json::to_string(&vec![""; signature.params.len()])?,
+                    "warp": if signature.warp { "true" } else { "false" }
+                }
+            }),
         );
         let (first, last) = self.emit_statement_chain(
             blocks,
@@ -881,12 +916,12 @@ impl<'a> ProjectBuilder<'a> {
             last: id,
         };
         match stmt {
-            Statement::Broadcast { message, .. } => {
-                Ok(single(self.emit_broadcast_stmt(blocks, parent_id, message)?))
-            }
-            Statement::BroadcastAndWait { message, .. } => {
-                Ok(single(self.emit_broadcast_and_wait_stmt(blocks, parent_id, message)?))
-            }
+            Statement::Broadcast { message, .. } => Ok(single(
+                self.emit_broadcast_stmt(blocks, parent_id, message)?,
+            )),
+            Statement::BroadcastAndWait { message, .. } => Ok(single(
+                self.emit_broadcast_and_wait_stmt(blocks, parent_id, message)?,
+            )),
             Statement::SetVar {
                 var_name, value, ..
             } => Ok(single(self.emit_set_stmt(
@@ -984,6 +1019,37 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
             )?)),
+            Statement::GoToTarget { target, .. } => Ok(single(self.emit_motion_target_menu_stmt(
+                blocks,
+                parent_id,
+                "motion_goto",
+                "TO",
+                "motion_goto_menu",
+                "TO",
+                target,
+                "_random_",
+            )?)),
+            Statement::GlideToXY { duration, x, y, .. } => Ok(single(self.emit_glide_to_xy_stmt(
+                blocks,
+                parent_id,
+                duration,
+                x,
+                y,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::GlideToTarget {
+                duration, target, ..
+            } => Ok(single(self.emit_glide_to_target_stmt(
+                blocks,
+                parent_id,
+                duration,
+                target,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
             Statement::ChangeXBy { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
@@ -1028,18 +1094,39 @@ impl<'a> ProjectBuilder<'a> {
                 param_scope,
                 "number",
             )?)),
-            Statement::PointInDirection { direction, .. } => Ok(single(self.emit_single_input_stmt(
+            Statement::PointInDirection { direction, .. } => {
+                Ok(single(self.emit_single_input_stmt(
+                    blocks,
+                    parent_id,
+                    "motion_pointindirection",
+                    "DIRECTION",
+                    direction,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?))
+            }
+            Statement::PointTowards { target, .. } => {
+                Ok(single(self.emit_motion_target_menu_stmt(
+                    blocks,
+                    parent_id,
+                    "motion_pointtowards",
+                    "TOWARDS",
+                    "motion_pointtowards_menu",
+                    "TOWARDS",
+                    target,
+                    "_mouse_",
+                )?))
+            }
+            Statement::SetRotationStyle { style, .. } => Ok(single(
+                self.emit_set_rotation_style_stmt(blocks, parent_id, style)?,
+            )),
+            Statement::IfOnEdgeBounce { .. } => Ok(single(self.emit_no_input_stmt(
                 blocks,
                 parent_id,
-                "motion_pointindirection",
-                "DIRECTION",
-                direction,
-                variables_map,
-                lists_map,
-                param_scope,
-                "number",
+                "motion_ifonedgebounce",
             )?)),
-            Statement::IfOnEdgeBounce { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "motion_ifonedgebounce")?)),
             Statement::ChangeSizeBy { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
@@ -1062,10 +1149,73 @@ impl<'a> ProjectBuilder<'a> {
                 param_scope,
                 "number",
             )?)),
-            Statement::PenDown { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_penDown")?)),
-            Statement::PenUp { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_penUp")?)),
-            Statement::PenClear { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_clear")?)),
-            Statement::PenStamp { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "pen_stamp")?)),
+            Statement::ClearGraphicEffects { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "looks_cleargraphiceffects",
+            )?)),
+            Statement::SetGraphicEffectTo { effect, value, .. } => {
+                Ok(single(self.emit_looks_effect_stmt(
+                    blocks,
+                    parent_id,
+                    "looks_seteffectto",
+                    "VALUE",
+                    "EFFECT",
+                    effect,
+                    value,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                )?))
+            }
+            Statement::ChangeGraphicEffectBy { effect, value, .. } => {
+                Ok(single(self.emit_looks_effect_stmt(
+                    blocks,
+                    parent_id,
+                    "looks_changeeffectby",
+                    "CHANGE",
+                    "EFFECT",
+                    effect,
+                    value,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                )?))
+            }
+            Statement::GoToLayer { layer, .. } => Ok(single(
+                self.emit_looks_layer_stmt(blocks, parent_id, layer)?,
+            )),
+            Statement::GoLayers {
+                direction, layers, ..
+            } => Ok(single(self.emit_looks_go_layers_stmt(
+                blocks,
+                parent_id,
+                direction,
+                layers,
+                variables_map,
+                lists_map,
+                param_scope,
+            )?)),
+            Statement::PenDown { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "pen_penDown",
+            )?)),
+            Statement::PenUp { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "pen_penUp",
+            )?)),
+            Statement::PenClear { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "pen_clear",
+            )?)),
+            Statement::PenStamp { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "pen_stamp",
+            )?)),
             Statement::ChangePenSizeBy { value, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
@@ -1088,30 +1238,50 @@ impl<'a> ProjectBuilder<'a> {
                 param_scope,
                 "number",
             )?)),
-            Statement::ChangePenColorParamBy { param, value, .. } => Ok(single(self.emit_pen_color_param_stmt(
+            Statement::ChangePenColorParamBy { param, value, .. } => {
+                Ok(single(self.emit_pen_color_param_stmt(
+                    blocks,
+                    parent_id,
+                    "pen_changePenColorParamBy",
+                    param,
+                    value,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                )?))
+            }
+            Statement::SetPenColorParamTo { param, value, .. } => {
+                Ok(single(self.emit_pen_color_param_stmt(
+                    blocks,
+                    parent_id,
+                    "pen_setPenColorParamTo",
+                    param,
+                    value,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                )?))
+            }
+            Statement::Show { .. } => Ok(single(self.emit_no_input_stmt(
                 blocks,
                 parent_id,
-                "pen_changePenColorParamBy",
-                param,
-                value,
-                variables_map,
-                lists_map,
-                param_scope,
+                "looks_show",
             )?)),
-            Statement::SetPenColorParamTo { param, value, .. } => Ok(single(self.emit_pen_color_param_stmt(
+            Statement::Hide { .. } => Ok(single(self.emit_no_input_stmt(
                 blocks,
                 parent_id,
-                "pen_setPenColorParamTo",
-                param,
-                value,
-                variables_map,
-                lists_map,
-                param_scope,
+                "looks_hide",
             )?)),
-            Statement::Show { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_show")?)),
-            Statement::Hide { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_hide")?)),
-            Statement::NextCostume { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextcostume")?)),
-            Statement::NextBackdrop { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "looks_nextbackdrop")?)),
+            Statement::NextCostume { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "looks_nextcostume",
+            )?)),
+            Statement::NextBackdrop { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "looks_nextbackdrop",
+            )?)),
             Statement::SwitchCostumeTo { costume, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
@@ -1123,17 +1293,19 @@ impl<'a> ProjectBuilder<'a> {
                 param_scope,
                 "string",
             )?)),
-            Statement::SwitchBackdropTo { backdrop, .. } => Ok(single(self.emit_single_input_stmt(
-                blocks,
-                parent_id,
-                "looks_switchbackdropto",
-                "BACKDROP",
-                backdrop,
-                variables_map,
-                lists_map,
-                param_scope,
-                "string",
-            )?)),
+            Statement::SwitchBackdropTo { backdrop, .. } => {
+                Ok(single(self.emit_single_input_stmt(
+                    blocks,
+                    parent_id,
+                    "looks_switchbackdropto",
+                    "BACKDROP",
+                    backdrop,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?))
+            }
             Statement::Wait { duration, .. } => Ok(single(self.emit_single_input_stmt(
                 blocks,
                 parent_id,
@@ -1247,7 +1419,78 @@ impl<'a> ProjectBuilder<'a> {
                 param_scope,
                 "string",
             )?)),
-            Statement::ResetTimer { .. } => Ok(single(self.emit_no_input_stmt(blocks, parent_id, "sensing_resettimer")?)),
+            Statement::StartSound { sound, .. } => Ok(single(self.emit_sound_menu_stmt(
+                blocks,
+                parent_id,
+                "sound_play",
+                sound,
+                "sound_play",
+            )?)),
+            Statement::PlaySoundUntilDone { sound, .. } => Ok(single(self.emit_sound_menu_stmt(
+                blocks,
+                parent_id,
+                "sound_playuntildone",
+                sound,
+                "sound_play",
+            )?)),
+            Statement::StopAllSounds { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "sound_stopallsounds",
+            )?)),
+            Statement::SetSoundEffectTo { effect, value, .. } => {
+                Ok(single(self.emit_sound_effect_stmt(
+                    blocks,
+                    parent_id,
+                    effect,
+                    value,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                )?))
+            }
+            Statement::SetVolumeTo { value, .. } => Ok(single(self.emit_single_input_stmt(
+                blocks,
+                parent_id,
+                "sound_setvolumeto",
+                "VOLUME",
+                value,
+                variables_map,
+                lists_map,
+                param_scope,
+                "number",
+            )?)),
+            Statement::CreateCloneOf { target, .. } => Ok(single(
+                self.emit_clone_target_menu_stmt(blocks, parent_id, target)?,
+            )),
+            Statement::DeleteThisClone { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "control_delete_this_clone",
+            )?)),
+            Statement::ShowVariable { var_name, .. } => {
+                Ok(single(self.emit_show_hide_variable_stmt(
+                    blocks,
+                    parent_id,
+                    "data_showvariable",
+                    var_name,
+                    variables_map,
+                )?))
+            }
+            Statement::HideVariable { var_name, .. } => {
+                Ok(single(self.emit_show_hide_variable_stmt(
+                    blocks,
+                    parent_id,
+                    "data_hidevariable",
+                    var_name,
+                    variables_map,
+                )?))
+            }
+            Statement::ResetTimer { .. } => Ok(single(self.emit_no_input_stmt(
+                blocks,
+                parent_id,
+                "sensing_resettimer",
+            )?)),
             Statement::AddToList {
                 list_name, item, ..
             } => Ok(single(self.emit_add_to_list_stmt(
@@ -1270,12 +1513,9 @@ impl<'a> ProjectBuilder<'a> {
                 lists_map,
                 param_scope,
             )?)),
-            Statement::DeleteAllOfList { list_name, .. } => Ok(single(self.emit_delete_all_of_list_stmt(
-                blocks,
-                parent_id,
-                list_name,
-                lists_map,
-            )?)),
+            Statement::DeleteAllOfList { list_name, .. } => Ok(single(
+                self.emit_delete_all_of_list_stmt(blocks, parent_id, list_name, lists_map)?,
+            )),
             Statement::InsertAtList {
                 list_name,
                 item,
@@ -1319,7 +1559,12 @@ impl<'a> ProjectBuilder<'a> {
         }
     }
 
-    fn emit_no_input_stmt(&mut self, blocks: &mut Map<String, Value>, parent_id: &str, opcode: &str) -> Result<String> {
+    fn emit_no_input_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        opcode: &str,
+    ) -> Result<String> {
         let block_id = self.new_block_id();
         blocks.insert(
             block_id.clone(),
@@ -1544,6 +1789,403 @@ impl<'a> ProjectBuilder<'a> {
         Ok(block_id)
     }
 
+    fn emit_glide_to_xy_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        duration: &Expr,
+        x: &Expr,
+        y: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let secs_input = self.expr_input(
+            blocks,
+            duration,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        let x_input = self.expr_input(
+            blocks,
+            x,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        let y_input = self.expr_input(
+            blocks,
+            y,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "motion_glidesecstoxy",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": { "SECS": secs_input, "X": x_input, "Y": y_input },
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_glide_to_target_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        duration: &Expr,
+        target: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let menu_id = self.new_block_id();
+        let secs_input = self.expr_input(
+            blocks,
+            duration,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        let target_value = self.menu_text_from_expr(target, "_random_");
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "motion_glideto",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": { "SECS": secs_input, "TO": [1, menu_id.clone()] },
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        blocks.insert(
+            menu_id,
+            json!({
+                "opcode": "motion_glideto_menu",
+                "next": Value::Null,
+                "parent": block_id.clone(),
+                "inputs": {},
+                "fields": {"TO": [target_value, Value::Null]},
+                "shadow": true,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_motion_target_menu_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        opcode: &str,
+        input_name: &str,
+        menu_opcode: &str,
+        field_name: &str,
+        target: &Expr,
+        fallback: &str,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let menu_id = self.new_block_id();
+        let target_value = self.menu_text_from_expr(target, fallback);
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": opcode,
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": { input_name: [1, menu_id.clone()] },
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        blocks.insert(
+            menu_id,
+            json!({
+                "opcode": menu_opcode,
+                "next": Value::Null,
+                "parent": block_id.clone(),
+                "inputs": {},
+                "fields": {field_name: [target_value, Value::Null]},
+                "shadow": true,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_set_rotation_style_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        style: &str,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "motion_setrotationstyle",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {"STYLE": [style, Value::Null]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn emit_looks_effect_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        opcode: &str,
+        input_name: &str,
+        field_name: &str,
+        effect: &str,
+        value: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let value_input = self.expr_input(
+            blocks,
+            value,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": opcode,
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {input_name: value_input},
+                "fields": {field_name: [effect, Value::Null]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_looks_layer_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        layer: &str,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "looks_gotofrontback",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {"FRONT_BACK": [layer, Value::Null]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_looks_go_layers_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        direction: &str,
+        layers: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let layers_input = self.expr_input(
+            blocks,
+            layers,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "looks_goforwardbackwardlayers",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"NUM": layers_input},
+                "fields": {"FORWARD_BACKWARD": [direction, Value::Null]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_sound_menu_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        opcode: &str,
+        sound: &Expr,
+        fallback_sound: &str,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let menu_id = self.new_block_id();
+        let sound_value = self.menu_text_from_expr(sound, fallback_sound);
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": opcode,
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"SOUND_MENU": [1, menu_id.clone()]},
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        blocks.insert(
+            menu_id,
+            json!({
+                "opcode": "sound_sounds_menu",
+                "next": Value::Null,
+                "parent": block_id.clone(),
+                "inputs": {},
+                "fields": {"SOUND_MENU": [sound_value, Value::Null]},
+                "shadow": true,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_sound_effect_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        effect: &str,
+        value: &Expr,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let value_input = self.expr_input(
+            blocks,
+            value,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "sound_seteffectto",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"VALUE": value_input},
+                "fields": {"EFFECT": [effect, Value::Null]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_clone_target_menu_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        target: &Expr,
+    ) -> Result<String> {
+        let block_id = self.new_block_id();
+        let menu_id = self.new_block_id();
+        let target_value = self.menu_text_from_expr(target, "_myself_");
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": "control_create_clone_of",
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {"CLONE_OPTION": [1, menu_id.clone()]},
+                "fields": {},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        blocks.insert(
+            menu_id,
+            json!({
+                "opcode": "control_create_clone_of_menu",
+                "next": Value::Null,
+                "parent": block_id.clone(),
+                "inputs": {},
+                "fields": {"CLONE_OPTION": [target_value, Value::Null]},
+                "shadow": true,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
+    fn emit_show_hide_variable_stmt(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        parent_id: &str,
+        opcode: &str,
+        var_name: &str,
+        variables_map: &HashMap<String, String>,
+    ) -> Result<String> {
+        let var_id = self.lookup_var_id(variables_map, var_name)?;
+        let block_id = self.new_block_id();
+        blocks.insert(
+            block_id.clone(),
+            json!({
+                "opcode": opcode,
+                "next": Value::Null,
+                "parent": parent_id,
+                "inputs": {},
+                "fields": {"VARIABLE": [var_name, var_id]},
+                "shadow": false,
+                "topLevel": false
+            }),
+        );
+        Ok(block_id)
+    }
+
     fn emit_broadcast_stmt(
         &mut self,
         blocks: &mut Map<String, Value>,
@@ -1685,8 +2327,15 @@ impl<'a> ProjectBuilder<'a> {
                 "topLevel": false
             }),
         );
-        let (sub_first, _) =
-            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        let (sub_first, _) = self.emit_statement_chain(
+            blocks,
+            body,
+            &block_id,
+            variables_map,
+            lists_map,
+            signatures,
+            param_scope,
+        )?;
         if let Some(substack) = sub_first {
             set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
         }
@@ -1728,8 +2377,15 @@ impl<'a> ProjectBuilder<'a> {
                 "topLevel": false
             }),
         );
-        let (sub_first, _) =
-            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        let (sub_first, _) = self.emit_statement_chain(
+            blocks,
+            body,
+            &block_id,
+            variables_map,
+            lists_map,
+            signatures,
+            param_scope,
+        )?;
         if let Some(substack) = sub_first {
             set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
         }
@@ -1769,8 +2425,15 @@ impl<'a> ProjectBuilder<'a> {
                 "topLevel": false
             }),
         );
-        let (sub_first, _) =
-            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        let (sub_first, _) = self.emit_statement_chain(
+            blocks,
+            body,
+            &block_id,
+            variables_map,
+            lists_map,
+            signatures,
+            param_scope,
+        )?;
         if let Some(substack) = sub_first {
             set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
         }
@@ -1810,8 +2473,15 @@ impl<'a> ProjectBuilder<'a> {
                 "topLevel": false
             }),
         );
-        let (sub_first, _) =
-            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        let (sub_first, _) = self.emit_statement_chain(
+            blocks,
+            body,
+            &block_id,
+            variables_map,
+            lists_map,
+            signatures,
+            param_scope,
+        )?;
         if let Some(substack) = sub_first {
             set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
         }
@@ -1841,8 +2511,15 @@ impl<'a> ProjectBuilder<'a> {
                 "topLevel": false
             }),
         );
-        let (sub_first, _) =
-            self.emit_statement_chain(blocks, body, &block_id, variables_map, lists_map, signatures, param_scope)?;
+        let (sub_first, _) = self.emit_statement_chain(
+            blocks,
+            body,
+            &block_id,
+            variables_map,
+            lists_map,
+            signatures,
+            param_scope,
+        )?;
         if let Some(substack) = sub_first {
             set_block_input(blocks, &block_id, "SUBSTACK", json!([2, substack]))?;
         }
@@ -2038,15 +2715,19 @@ impl<'a> ProjectBuilder<'a> {
         lists_map: &HashMap<String, String>,
         param_scope: &HashSet<String>,
     ) -> Result<EmittedStatement> {
-        let spec = self.lookup_remote_call_spec(callee_target, callee_proc, args.len())?.clone();
+        let spec = self
+            .lookup_remote_call_spec(callee_target, callee_proc, args.len())?
+            .clone();
         let mut first: Option<String> = None;
         let mut prev: Option<String> = None;
 
         for (idx, expr) in args.iter().enumerate() {
-            let arg_var_name = spec
-                .arg_var_names
-                .get(idx)
-                .ok_or_else(|| anyhow!("Internal error: missing RPC arg variable for index {}.", idx))?;
+            let arg_var_name = spec.arg_var_names.get(idx).ok_or_else(|| {
+                anyhow!(
+                    "Internal error: missing RPC arg variable for index {}.",
+                    idx
+                )
+            })?;
             let arg_var_id = self.lookup_var_id(variables_map, arg_var_name)?;
             let block_id = self.new_block_id();
             let val_input = self.expr_input(
@@ -2081,7 +2762,8 @@ impl<'a> ProjectBuilder<'a> {
         }
 
         let parent_for_broadcast = prev.clone().unwrap_or_else(|| parent_id.to_string());
-        let broadcast_id = self.emit_broadcast_and_wait_stmt(blocks, &parent_for_broadcast, &spec.message)?;
+        let broadcast_id =
+            self.emit_broadcast_and_wait_stmt(blocks, &parent_for_broadcast, &spec.message)?;
         if let Some(prev_id) = &prev {
             set_block_next(blocks, prev_id, Value::String(broadcast_id.clone()))?;
         } else {
@@ -2142,8 +2824,15 @@ impl<'a> ProjectBuilder<'a> {
     ) -> Result<String> {
         let list_id = self.lookup_list_id(lists_map, list_name)?;
         let block_id = self.new_block_id();
-        let item_input =
-            self.expr_input(blocks, item, &block_id, variables_map, lists_map, param_scope, "string")?;
+        let item_input = self.expr_input(
+            blocks,
+            item,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "string",
+        )?;
         blocks.insert(
             block_id.clone(),
             json!({
@@ -2171,8 +2860,15 @@ impl<'a> ProjectBuilder<'a> {
     ) -> Result<String> {
         let list_id = self.lookup_list_id(lists_map, list_name)?;
         let block_id = self.new_block_id();
-        let index_input =
-            self.expr_input(blocks, index, &block_id, variables_map, lists_map, param_scope, "number")?;
+        let index_input = self.expr_input(
+            blocks,
+            index,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
         blocks.insert(
             block_id.clone(),
             json!({
@@ -2225,10 +2921,24 @@ impl<'a> ProjectBuilder<'a> {
     ) -> Result<String> {
         let list_id = self.lookup_list_id(lists_map, list_name)?;
         let block_id = self.new_block_id();
-        let item_input =
-            self.expr_input(blocks, item, &block_id, variables_map, lists_map, param_scope, "string")?;
-        let index_input =
-            self.expr_input(blocks, index, &block_id, variables_map, lists_map, param_scope, "number")?;
+        let item_input = self.expr_input(
+            blocks,
+            item,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "string",
+        )?;
+        let index_input = self.expr_input(
+            blocks,
+            index,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
         blocks.insert(
             block_id.clone(),
             json!({
@@ -2257,10 +2967,24 @@ impl<'a> ProjectBuilder<'a> {
     ) -> Result<String> {
         let list_id = self.lookup_list_id(lists_map, list_name)?;
         let block_id = self.new_block_id();
-        let index_input =
-            self.expr_input(blocks, index, &block_id, variables_map, lists_map, param_scope, "number")?;
-        let item_input =
-            self.expr_input(blocks, item, &block_id, variables_map, lists_map, param_scope, "string")?;
+        let index_input = self.expr_input(
+            blocks,
+            index,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "number",
+        )?;
+        let item_input = self.expr_input(
+            blocks,
+            item,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            "string",
+        )?;
         blocks.insert(
             block_id.clone(),
             json!({
@@ -2289,7 +3013,14 @@ impl<'a> ProjectBuilder<'a> {
         if let Some(literal) = self.literal_input(expr) {
             return Ok(json!([1, literal]));
         }
-        let reporter_id = self.emit_expr_reporter(blocks, expr, parent_id, variables_map, lists_map, param_scope)?;
+        let reporter_id = self.emit_expr_reporter(
+            blocks,
+            expr,
+            parent_id,
+            variables_map,
+            lists_map,
+            param_scope,
+        )?;
         if let Some(id) = reporter_id {
             Ok(json!([2, id]))
         } else {
@@ -2357,8 +3088,15 @@ impl<'a> ProjectBuilder<'a> {
                         "topLevel": false
                     }),
                 );
-                let num_input =
-                    self.expr_input(blocks, value, &block_id, variables_map, lists_map, param_scope, "number")?;
+                let num_input = self.expr_input(
+                    blocks,
+                    value,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?;
                 set_block_input(blocks, &block_id, "NUM", num_input)?;
                 Ok(Some(block_id))
             }
@@ -2455,10 +3193,24 @@ impl<'a> ProjectBuilder<'a> {
                         "topLevel": false
                     }),
                 );
-                let from_input =
-                    self.expr_input(blocks, start, &block_id, variables_map, lists_map, param_scope, "number")?;
-                let to_input =
-                    self.expr_input(blocks, end, &block_id, variables_map, lists_map, param_scope, "number")?;
+                let from_input = self.expr_input(
+                    blocks,
+                    start,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?;
+                let to_input = self.expr_input(
+                    blocks,
+                    end,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?;
                 set_block_input(blocks, &block_id, "FROM", from_input)?;
                 set_block_input(blocks, &block_id, "TO", to_input)?;
                 Ok(Some(block_id))
@@ -2480,8 +3232,15 @@ impl<'a> ProjectBuilder<'a> {
                         "topLevel": false
                     }),
                 );
-                let index_input =
-                    self.expr_input(blocks, index, &block_id, variables_map, lists_map, param_scope, "number")?;
+                let index_input = self.expr_input(
+                    blocks,
+                    index,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?;
                 set_block_input(blocks, &block_id, "INDEX", index_input)?;
                 Ok(Some(block_id))
             }
@@ -2536,8 +3295,15 @@ impl<'a> ProjectBuilder<'a> {
                         "topLevel": false
                     }),
                 );
-                let item_input =
-                    self.expr_input(blocks, item, &block_id, variables_map, lists_map, param_scope, "string")?;
+                let item_input = self.expr_input(
+                    blocks,
+                    item,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
                 set_block_input(blocks, &block_id, "ITEM", item_input)?;
                 Ok(Some(block_id))
             }
@@ -2597,15 +3363,29 @@ impl<'a> ProjectBuilder<'a> {
                         }),
                     );
                     set_block_input(blocks, &block_id, "NUM1", json!([1, [4, "0"]]))?;
-                    let right_input =
-                        self.expr_input(blocks, operand, &block_id, variables_map, lists_map, param_scope, "number")?;
+                    let right_input = self.expr_input(
+                        blocks,
+                        operand,
+                        &block_id,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                        "number",
+                    )?;
                     set_block_input(blocks, &block_id, "NUM2", right_input)?;
                     return Ok(Some(block_id));
                 }
                 if op == "not" {
                     let block_id = self.new_block_id();
-                    let operand_input =
-                        self.expr_input(blocks, operand, &block_id, variables_map, lists_map, param_scope, "boolean")?;
+                    let operand_input = self.expr_input(
+                        blocks,
+                        operand,
+                        &block_id,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                        "boolean",
+                    )?;
                     blocks.insert(
                         block_id.clone(),
                         json!({
@@ -2677,9 +3457,14 @@ impl<'a> ProjectBuilder<'a> {
                 left: Box::new(first),
                 right: Box::new(second),
             };
-            if let Some(id) =
-                self.emit_expr_reporter(blocks, &rewritten, parent_id, variables_map, lists_map, param_scope)?
-            {
+            if let Some(id) = self.emit_expr_reporter(
+                blocks,
+                &rewritten,
+                parent_id,
+                variables_map,
+                lists_map,
+                param_scope,
+            )? {
                 return Ok(id);
             }
             bail!("Failed to emit rewritten '{}' expression.", op);
@@ -2697,9 +3482,14 @@ impl<'a> ProjectBuilder<'a> {
                 op: "not".to_string(),
                 operand: Box::new(eq_expr),
             };
-            if let Some(id) =
-                self.emit_expr_reporter(blocks, &not_expr, parent_id, variables_map, lists_map, param_scope)?
-            {
+            if let Some(id) = self.emit_expr_reporter(
+                blocks,
+                &not_expr,
+                parent_id,
+                variables_map,
+                lists_map,
+                param_scope,
+            )? {
                 return Ok(id);
             }
             bail!("Failed to emit inequality expression.");
@@ -2719,9 +3509,8 @@ impl<'a> ProjectBuilder<'a> {
             _ => bail!("Unsupported binary operator '{}'.", op),
         };
         let (left_key, right_key, kind) = match opcode {
-            "operator_add" | "operator_subtract" | "operator_multiply" | "operator_divide" | "operator_mod" => {
-                ("NUM1", "NUM2", "number")
-            }
+            "operator_add" | "operator_subtract" | "operator_multiply" | "operator_divide"
+            | "operator_mod" => ("NUM1", "NUM2", "number"),
             "operator_lt" | "operator_gt" => ("OPERAND1", "OPERAND2", "number"),
             "operator_equals" => ("OPERAND1", "OPERAND2", "string"),
             "operator_and" | "operator_or" => ("OPERAND1", "OPERAND2", "boolean"),
@@ -2741,8 +3530,24 @@ impl<'a> ProjectBuilder<'a> {
                 "topLevel": false
             }),
         );
-        let left_input = self.expr_input(blocks, left, &block_id, variables_map, lists_map, param_scope, kind)?;
-        let right_input = self.expr_input(blocks, right, &block_id, variables_map, lists_map, param_scope, kind)?;
+        let left_input = self.expr_input(
+            blocks,
+            left,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            kind,
+        )?;
+        let right_input = self.expr_input(
+            blocks,
+            right,
+            &block_id,
+            variables_map,
+            lists_map,
+            param_scope,
+            kind,
+        )?;
         set_block_input(blocks, &block_id, left_key, left_input)?;
         set_block_input(blocks, &block_id, right_key, right_input)?;
         Ok(block_id)
@@ -2756,14 +3561,31 @@ impl<'a> ProjectBuilder<'a> {
         }
     }
 
-    fn lookup_var_id(&self, variables_map: &HashMap<String, String>, var_name: &str) -> Result<String> {
+    fn menu_text_from_expr(&self, expr: &Expr, fallback: &str) -> String {
+        match expr {
+            Expr::String { value, .. } => value.clone(),
+            Expr::Number { value, .. } => format_num(*value),
+            Expr::Var { name, .. } => name.clone(),
+            _ => fallback.to_string(),
+        }
+    }
+
+    fn lookup_var_id(
+        &self,
+        variables_map: &HashMap<String, String>,
+        var_name: &str,
+    ) -> Result<String> {
         variables_map
             .get(&var_name.to_lowercase())
             .cloned()
             .ok_or_else(|| anyhow!("Variable '{}' is not declared.", var_name))
     }
 
-    fn lookup_list_id(&self, lists_map: &HashMap<String, String>, list_name: &str) -> Result<String> {
+    fn lookup_list_id(
+        &self,
+        lists_map: &HashMap<String, String>,
+        list_name: &str,
+    ) -> Result<String> {
         lists_map
             .get(&list_name.to_lowercase())
             .cloned()
@@ -2892,7 +3714,11 @@ impl<'a> ProjectBuilder<'a> {
             let digest = format!("{:x}", md5::compute(&prepared));
             let md5ext = format!("{}.svg", digest);
             let fallback_name = uniquify_costume_name(
-                if target.is_stage { "backdrop1" } else { "costume1" },
+                if target.is_stage {
+                    "backdrop1"
+                } else {
+                    "costume1"
+                },
                 &mut used_names,
             );
             self.assets.insert(md5ext.clone(), prepared);
@@ -2913,7 +3739,14 @@ impl<'a> ProjectBuilder<'a> {
             .map_err(|e| anyhow!("Invalid SVG file '{}': {}.", source_name, e))?;
         let (min_x, min_y, width, height) = self.read_svg_bounds(&root, source_name)?;
         if self.options.scale_svgs {
-            self.normalize_svg_root(&mut root, min_x, min_y, width, height, DEFAULT_SVG_TARGET_SIZE)?;
+            self.normalize_svg_root(
+                &mut root,
+                min_x,
+                min_y,
+                width,
+                height,
+                DEFAULT_SVG_TARGET_SIZE,
+            )?;
             let centered = DEFAULT_SVG_TARGET_SIZE / 2.0;
             let mut out = Vec::new();
             root.write(&mut out)?;
@@ -2949,15 +3782,23 @@ impl<'a> ProjectBuilder<'a> {
         let mut wrapper = Element::new("g");
         wrapper.prefix = root.prefix.clone();
         wrapper.namespace = root.namespace.clone();
-        wrapper.attributes.insert("transform".to_string(), transform);
+        wrapper
+            .attributes
+            .insert("transform".to_string(), transform);
         wrapper.children = std::mem::take(&mut root.children);
 
         root.attributes.insert(
             "viewBox".to_string(),
-            format!("0 0 {} {}", format_num(target_size), format_num(target_size)),
+            format!(
+                "0 0 {} {}",
+                format_num(target_size),
+                format_num(target_size)
+            ),
         );
-        root.attributes.insert("width".to_string(), format_num(target_size));
-        root.attributes.insert("height".to_string(), format_num(target_size));
+        root.attributes
+            .insert("width".to_string(), format_num(target_size));
+        root.attributes
+            .insert("height".to_string(), format_num(target_size));
         root.children.push(XMLNode::Element(wrapper));
         Ok(())
     }
@@ -2979,7 +3820,11 @@ impl<'a> ProjectBuilder<'a> {
         Ok((0.0, 0.0, DEFAULT_SVG_TARGET_SIZE, DEFAULT_SVG_TARGET_SIZE))
     }
 
-    fn parse_view_box(&self, view_box: &str, source_name: &str) -> Result<Option<(f64, f64, f64, f64)>> {
+    fn parse_view_box(
+        &self,
+        view_box: &str,
+        source_name: &str,
+    ) -> Result<Option<(f64, f64, f64, f64)>> {
         let parts = view_box
             .split(|c: char| c.is_whitespace() || c == ',')
             .filter(|s| !s.is_empty())
@@ -3000,7 +3845,10 @@ impl<'a> ProjectBuilder<'a> {
             .parse::<f64>()
             .map_err(|_| anyhow!("Invalid SVG viewBox in '{}': '{}'.", source_name, view_box))?;
         if width <= 0.0 || height <= 0.0 {
-            bail!("SVG viewBox must have positive width/height in '{}'.", source_name);
+            bail!(
+                "SVG viewBox must have positive width/height in '{}'.",
+                source_name
+            );
         }
         Ok(Some((min_x, min_y, width, height)))
     }
@@ -3118,7 +3966,9 @@ fn statements_use_pen_extension(statements: &[Statement]) -> bool {
                 else_body,
                 ..
             } => {
-                if statements_use_pen_extension(then_body) || statements_use_pen_extension(else_body) {
+                if statements_use_pen_extension(then_body)
+                    || statements_use_pen_extension(else_body)
+                {
                     return true;
                 }
             }
@@ -3202,7 +4052,12 @@ fn set_block_next(blocks: &mut Map<String, Value>, block_id: &str, next: Value) 
     Ok(())
 }
 
-fn set_block_input(blocks: &mut Map<String, Value>, block_id: &str, key: &str, value: Value) -> Result<()> {
+fn set_block_input(
+    blocks: &mut Map<String, Value>,
+    block_id: &str,
+    key: &str,
+    value: Value,
+) -> Result<()> {
     let block = blocks
         .get_mut(block_id)
         .ok_or_else(|| anyhow!("Missing block '{}'.", block_id))?;
@@ -3233,7 +4088,11 @@ fn is_nonpositive_viewbox_error(err: &anyhow::Error) -> bool {
 
 fn uniquify_costume_name(base: &str, used: &mut HashSet<String>) -> String {
     let trimmed = base.trim();
-    let base_name = if trimmed.is_empty() { "costume" } else { trimmed };
+    let base_name = if trimmed.is_empty() {
+        "costume"
+    } else {
+        trimmed
+    };
     let mut candidate = base_name.to_string();
     let mut suffix = 2usize;
     while !used.insert(candidate.to_lowercase()) {

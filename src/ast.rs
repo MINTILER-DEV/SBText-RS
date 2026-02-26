@@ -189,6 +189,21 @@ pub enum Statement {
         x: Expr,
         y: Expr,
     },
+    GoToTarget {
+        pos: Position,
+        target: Expr,
+    },
+    GlideToXY {
+        pos: Position,
+        duration: Expr,
+        x: Expr,
+        y: Expr,
+    },
+    GlideToTarget {
+        pos: Position,
+        duration: Expr,
+        target: Expr,
+    },
     ChangeXBy {
         pos: Position,
         value: Expr,
@@ -209,6 +224,14 @@ pub enum Statement {
         pos: Position,
         direction: Expr,
     },
+    PointTowards {
+        pos: Position,
+        target: Expr,
+    },
+    SetRotationStyle {
+        pos: Position,
+        style: String,
+    },
     IfOnEdgeBounce {
         pos: Position,
     },
@@ -219,6 +242,28 @@ pub enum Statement {
     SetSizeTo {
         pos: Position,
         value: Expr,
+    },
+    ClearGraphicEffects {
+        pos: Position,
+    },
+    SetGraphicEffectTo {
+        pos: Position,
+        effect: String,
+        value: Expr,
+    },
+    ChangeGraphicEffectBy {
+        pos: Position,
+        effect: String,
+        value: Expr,
+    },
+    GoToLayer {
+        pos: Position,
+        layer: String,
+    },
+    GoLayers {
+        pos: Position,
+        direction: String,
+        layers: Expr,
     },
     PenDown {
         pos: Position,
@@ -278,6 +323,41 @@ pub enum Statement {
         pos: Position,
         question: Expr,
     },
+    StartSound {
+        pos: Position,
+        sound: Expr,
+    },
+    PlaySoundUntilDone {
+        pos: Position,
+        sound: Expr,
+    },
+    StopAllSounds {
+        pos: Position,
+    },
+    SetSoundEffectTo {
+        pos: Position,
+        effect: String,
+        value: Expr,
+    },
+    SetVolumeTo {
+        pos: Position,
+        value: Expr,
+    },
+    CreateCloneOf {
+        pos: Position,
+        target: Expr,
+    },
+    DeleteThisClone {
+        pos: Position,
+    },
+    ShowVariable {
+        pos: Position,
+        var_name: String,
+    },
+    HideVariable {
+        pos: Position,
+        var_name: String,
+    },
     ResetTimer {
         pos: Position,
     },
@@ -332,14 +412,24 @@ impl Statement {
             | Statement::TurnRight { pos, .. }
             | Statement::TurnLeft { pos, .. }
             | Statement::GoToXY { pos, .. }
+            | Statement::GoToTarget { pos, .. }
+            | Statement::GlideToXY { pos, .. }
+            | Statement::GlideToTarget { pos, .. }
             | Statement::ChangeXBy { pos, .. }
             | Statement::SetX { pos, .. }
             | Statement::ChangeYBy { pos, .. }
             | Statement::SetY { pos, .. }
             | Statement::PointInDirection { pos, .. }
+            | Statement::PointTowards { pos, .. }
+            | Statement::SetRotationStyle { pos, .. }
             | Statement::IfOnEdgeBounce { pos, .. }
             | Statement::ChangeSizeBy { pos, .. }
             | Statement::SetSizeTo { pos, .. }
+            | Statement::ClearGraphicEffects { pos, .. }
+            | Statement::SetGraphicEffectTo { pos, .. }
+            | Statement::ChangeGraphicEffectBy { pos, .. }
+            | Statement::GoToLayer { pos, .. }
+            | Statement::GoLayers { pos, .. }
             | Statement::PenDown { pos, .. }
             | Statement::PenUp { pos, .. }
             | Statement::PenClear { pos, .. }
@@ -356,6 +446,15 @@ impl Statement {
             | Statement::SwitchBackdropTo { pos, .. }
             | Statement::Stop { pos, .. }
             | Statement::Ask { pos, .. }
+            | Statement::StartSound { pos, .. }
+            | Statement::PlaySoundUntilDone { pos, .. }
+            | Statement::StopAllSounds { pos, .. }
+            | Statement::SetSoundEffectTo { pos, .. }
+            | Statement::SetVolumeTo { pos, .. }
+            | Statement::CreateCloneOf { pos, .. }
+            | Statement::DeleteThisClone { pos, .. }
+            | Statement::ShowVariable { pos, .. }
+            | Statement::HideVariable { pos, .. }
             | Statement::ResetTimer { pos, .. }
             | Statement::AddToList { pos, .. }
             | Statement::DeleteOfList { pos, .. }
