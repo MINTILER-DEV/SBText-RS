@@ -715,7 +715,7 @@ fn decompile_statement(
         }
         "procedures_call" => {
             let (name, arg_order) = procedure_call_shape(block)?;
-            let mut line = format!("{}{}", pad, name);
+            let mut line = format!("{}{}", pad, format_call_name(&name));
             for arg_id in arg_order {
                 let arg_expr = expr_from_input(blocks, block, &arg_id)?;
                 line.push_str(&format!(" ({})", arg_expr));
@@ -1073,6 +1073,14 @@ fn format_var_ref(name: String) -> String {
         name
     } else {
         format!("[{}]", format_bracket_name(&name))
+    }
+}
+
+fn format_call_name(name: &str) -> String {
+    if is_simple_identifier_or_qualified(name) {
+        name.to_string()
+    } else {
+        quote_str(name)
     }
 }
 
