@@ -25,6 +25,18 @@ pub struct MergedSource {
 }
 
 impl MergedSource {
+    pub fn new(source: String, line_origins: Vec<SourceLineOrigin>, entry_file: PathBuf) -> Self {
+        Self {
+            source,
+            line_origins,
+            entry_file,
+        }
+    }
+
+    pub fn entry_file(&self) -> &Path {
+        &self.entry_file
+    }
+
     pub fn map_position(&self, merged_line: usize, merged_column: usize) -> MappedPosition {
         if self.line_origins.is_empty() {
             return MappedPosition {
@@ -97,11 +109,11 @@ pub fn resolve_merged_source_with_map(entry: &Path) -> Result<MergedSource> {
         out.push('\n');
         out
     };
-    Ok(MergedSource {
+    Ok(MergedSource::new(
         source,
-        line_origins: resolved.merged_line_origins,
-        entry_file: canonical_entry,
-    })
+        resolved.merged_line_origins,
+        canonical_entry,
+    ))
 }
 
 fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathBuf, ResolvedFile>) -> Result<ResolvedFile> {

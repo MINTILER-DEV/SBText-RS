@@ -24,6 +24,18 @@ pub struct Args {
 
     #[arg(
         long,
+        help = "Write merged/compiled SBText bundle (.sbtc) to this path."
+    )]
+    pub emit_sbtc: Option<PathBuf>,
+
+    #[arg(
+        long,
+        help = "Treat INPUT as an .sbtc bundle (command alias for .sbtc input mode)."
+    )]
+    pub compile_sbtc: bool,
+
+    #[arg(
+        long,
         help = "Use Python backend instead of native Rust backend (parity checks only)."
     )]
     pub python_backend: bool,

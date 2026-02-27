@@ -3,6 +3,7 @@ pub mod codegen;
 pub mod imports;
 pub mod lexer;
 pub mod parser;
+pub mod sbtc;
 pub mod semantic;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -39,6 +40,12 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         if args.emit_merged.is_some() {
             anyhow::bail!("--emit-merged cannot be used with --decompile.");
         }
+        if args.emit_sbtc.is_some() {
+            anyhow::bail!("--emit-sbtc cannot be used with --decompile.");
+        }
+        if args.compile_sbtc {
+            anyhow::bail!("--compile-sbtc cannot be used with --decompile.");
+        }
         if args.allow_unknown_procedures {
             anyhow::bail!("--allow-unknown-procedures cannot be used with --decompile.");
         }
@@ -72,9 +79,25 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
     let mut progress = CliProgress::new("Compile");
     progress.emit("Resolving input path", 1, 1);
     let input = canonicalize_file(&args.input)?;
+    let input_is_sbtc = args.compile_sbtc || is_sbtc_path(&input);
 
-    progress.emit("Resolving imports", 1, 1);
-    let merged = resolve_merged_source_with_map(&input)?;
+    if args.python_backend && input_is_sbtc {
+        anyhow::bail!("--python-backend is not supported with .sbtc input.");
+    }
+
+    let (merged, compile_source_dir) = if input_is_sbtc {
+        progress.emit("Reading .sbtc bundle", 1, 1);
+        let (merged, source_dir_from_bundle) = sbtc::read_sbtc_file(&input)?;
+        let source_dir =
+            source_dir_from_bundle.unwrap_or_else(|| default_source_dir_for_input(&input));
+        (merged, source_dir)
+    } else {
+        progress.emit("Resolving imports", 1, 1);
+        (
+            resolve_merged_source_with_map(&input)?,
+            default_source_dir_for_input(&input),
+        )
+    };
 
     let (project, semantic_report) = {
         let mut analyze_progress_cb = |step: usize, total: usize, label: &str| {
@@ -102,6 +125,10 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         progress.emit("Writing merged source", 1, 1);
         std::fs::write(emit_path, merged.source.as_bytes())?;
     }
+    if let Some(emit_path) = &args.emit_sbtc {
+        progress.emit("Writing .sbtc bundle", 1, 1);
+        sbtc::write_sbtc_file(&merged, &compile_source_dir, emit_path)?;
+    }
 
     if let Some(output) = &args.output {
         if args.python_backend {
@@ -118,7 +145,7 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
                 };
                 codegen::write_sb3_with_progress(
                     &project,
-                    &input.parent().unwrap_or(input.as_path()),
+                    &compile_source_dir,
                     output,
                     options,
                     Some(&mut codegen_progress_cb),
@@ -135,11 +162,39 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
 
 pub fn compile_entry_to_sb3_bytes(input: &Path, scale_svgs: bool) -> Result<Vec<u8>> {
     let input = canonicalize_file(input)?;
-    let merged = resolve_merged_source_with_map(&input)?;
+    let (merged, source_dir) = if is_sbtc_path(&input) {
+        let (merged, source_dir_from_bundle) = sbtc::read_sbtc_file(&input)?;
+        let source_dir =
+            source_dir_from_bundle.unwrap_or_else(|| default_source_dir_for_input(&input));
+        (merged, source_dir)
+    } else {
+        (
+            resolve_merged_source_with_map(&input)?,
+            default_source_dir_for_input(&input),
+        )
+    };
     let project = parse_and_validate_project(&merged)?;
     codegen::build_sb3_bytes(
         &project,
-        &input.parent().unwrap_or(input.as_path()),
+        &source_dir,
+        CodegenOptions {
+            scale_svgs,
+            allow_unknown_procedures: false,
+        },
+    )
+}
+
+pub fn compile_sbtc_bytes_to_sb3_bytes(
+    sbtc_bytes: &[u8],
+    fallback_source_dir: &Path,
+    scale_svgs: bool,
+) -> Result<Vec<u8>> {
+    let (merged, source_dir_from_bundle) = sbtc::read_sbtc_bytes(sbtc_bytes)?;
+    let source_dir = source_dir_from_bundle.unwrap_or_else(|| fallback_source_dir.to_path_buf());
+    let project = parse_and_validate_project(&merged)?;
+    codegen::build_sb3_bytes(
+        &project,
+        &source_dir,
         CodegenOptions {
             scale_svgs,
             allow_unknown_procedures: false,
@@ -308,6 +363,20 @@ fn pretty_path(path: &Path) -> String {
     } else {
         raw
     }
+}
+
+fn default_source_dir_for_input(input: &Path) -> PathBuf {
+    input
+        .parent()
+        .unwrap_or(input)
+        .to_path_buf()
+}
+
+fn is_sbtc_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("sbtc"))
+        .unwrap_or(false)
 }
 
 fn report_analysis_progress<F>(

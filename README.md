@@ -37,6 +37,9 @@ sbtext-rs INPUT OUTPUT --no-svg-scale
 sbtext-rs INPUT OUTPUT --python-backend
 sbtext-rs INPUT OUTPUT --allow-unknown-procedures
 sbtext-rs INPUT --emit-merged merged.sbtext
+sbtext-rs INPUT --emit-sbtc bundle.sbtc
+sbtext-rs INPUT.sbtc OUTPUT.sb3
+sbtext-rs INPUT OUTPUT --compile-sbtc
 sbtext-rs INPUT.sb3 --decompile
 sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
 ```
@@ -48,9 +51,23 @@ sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
   - `run_cli(...)`
   - `compile_entry_to_sb3_bytes(...)`
   - `compile_source_to_sb3_bytes(...)`
+  - `compile_sbtc_bytes_to_sb3_bytes(...)`
 - WASM exports (feature-gated) are in `src/wasm.rs`:
   - `compile_source_to_sb3(...)`
   - `compile_source_to_sb3_with_options(...)`
+  - `compile_sbtc_to_sb3(...)`
+  - `compile_sbtc_to_sb3_with_options(...)`
+
+## SBTC Bundle
+
+- `.sbtc` is a compressed SBText compilation bundle.
+- It contains:
+  - merged SBText source (`merged.sbtext`)
+  - merged SBText with origin markers (`merged_marked.sbtext`)
+  - line origin map (`line_map.json`)
+  - manifest (`manifest.json`)
+- Build one from normal input with `--emit-sbtc`.
+- Compile directly from `.sbtc` by using it as CLI input.
 
 ## SB3 Decompile
 
