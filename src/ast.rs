@@ -53,6 +53,14 @@ pub enum Expr {
         pos: Position,
         key: Box<Expr>,
     },
+    TouchingObject {
+        pos: Position,
+        target: Box<Expr>,
+    },
+    TouchingColor {
+        pos: Position,
+        color: Box<Expr>,
+    },
     BuiltinReporter {
         pos: Position,
         kind: String,
@@ -87,6 +95,8 @@ impl Expr {
             | Expr::ListContains { pos, .. }
             | Expr::ListContents { pos, .. }
             | Expr::KeyPressed { pos, .. }
+            | Expr::TouchingObject { pos, .. }
+            | Expr::TouchingColor { pos, .. }
             | Expr::BuiltinReporter { pos, .. }
             | Expr::MathFunc { pos, .. }
             | Expr::Unary { pos, .. }
@@ -496,15 +506,23 @@ pub struct CostumeDecl {
 }
 
 #[derive(Debug, Clone)]
+pub enum InitialValue {
+    Number(f64),
+    String(String),
+}
+
+#[derive(Debug, Clone)]
 pub struct VariableDecl {
     pub pos: Position,
     pub name: String,
+    pub initial_value: Option<InitialValue>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ListDecl {
     pub pos: Position,
     pub name: String,
+    pub initial_items: Option<Vec<InitialValue>>,
 }
 
 #[derive(Debug, Clone)]

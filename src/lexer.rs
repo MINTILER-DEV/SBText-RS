@@ -66,8 +66,21 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn tokenize(&mut self) -> Result<Vec<Token>, LexerError> {
+        self.tokenize_with_progress(Option::<&mut fn(usize)>::None)
+    }
+
+    pub fn tokenize_with_progress<F>(
+        &mut self,
+        mut progress: Option<&mut F>,
+    ) -> Result<Vec<Token>, LexerError>
+    where
+        F: FnMut(usize),
+    {
         let mut tokens = Vec::new();
+        let total_chars = self.chars.len().max(1);
+        let mut last_percent = 0usize;
         while !self.at_end() {
+            self.emit_percent_progress(&mut progress, total_chars, &mut last_percent);
             let ch = self.peek();
             if is_ignorable_format_char(ch) {
                 self.advance();
@@ -88,7 +101,17 @@ impl<'a> Lexer<'a> {
                 continue;
             }
             if ch == '#' {
-                self.skip_comment();
+                if self.starts_comment() {
+                    self.skip_comment();
+                    continue;
+                }
+                let pos = self.pos();
+                self.advance();
+                tokens.push(Token {
+                    typ: TokenType::Op,
+                    value: "#".to_string(),
+                    pos,
+                });
                 continue;
             }
             if ch == '"' {
@@ -173,7 +196,32 @@ impl<'a> Lexer<'a> {
             value: String::new(),
             pos: self.pos(),
         });
+        if let Some(cb) = progress.as_deref_mut() {
+            for pct in (last_percent + 1)..=100 {
+                cb(pct);
+            }
+        }
         Ok(tokens)
+    }
+
+    fn emit_percent_progress<F>(
+        &self,
+        progress: &mut Option<&mut F>,
+        total_chars: usize,
+        last_percent: &mut usize,
+    ) where
+        F: FnMut(usize),
+    {
+        let percent = (self.index.saturating_mul(100) / total_chars).clamp(1, 99);
+        if percent <= *last_percent {
+            return;
+        }
+        if let Some(cb) = progress.as_deref_mut() {
+            for pct in (*last_percent + 1)..=percent {
+                cb(pct);
+            }
+        }
+        *last_percent = percent;
     }
 
     fn read_operator(&mut self) -> Token {
@@ -335,6 +383,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    fn starts_comment(&self) -> bool {
+        let next = self.peek_next();
+        !matches!(next, ')' | ']' | '>' | ',' | '=')
+    }
+
     fn at_end(&self) -> bool {
         self.index >= self.chars.len()
     }
@@ -436,6 +489,7 @@ fn keyword_set() -> HashSet<&'static str> {
         "not",
         "of",
         "on",
+        "object",
         "or",
         "pick",
         "point",
@@ -470,6 +524,7 @@ fn keyword_set() -> HashSet<&'static str> {
         "think",
         "this",
         "timer",
+        "touching",
         "to",
         "towards",
         "transparency",

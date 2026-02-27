@@ -17,7 +17,7 @@ pub mod decompile;
 use anyhow::Result;
 use codegen::CodegenOptions;
 use imports::{resolve_merged_source_with_map, MergedSource};
-use lexer::Lexer;
+use lexer::{Lexer, TokenType};
 use parser::Parser as SbParser;
 use semantic::{
     analyze as semantic_analyze, analyze_with_options as semantic_analyze_with_options, SemanticOptions,
@@ -76,13 +76,18 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
     progress.emit("Resolving imports", 1, 1);
     let merged = resolve_merged_source_with_map(&input)?;
 
-    progress.emit("Lexing, parsing, and semantic checks", 1, 1);
-    let (project, semantic_report) = parse_and_validate_project_with_options(
-        &merged,
-        SemanticOptions {
-            allow_unknown_procedures: args.allow_unknown_procedures,
-        },
-    )?;
+    let (project, semantic_report) = {
+        let mut analyze_progress_cb = |step: usize, total: usize, label: &str| {
+            progress.emit(label, step, total);
+        };
+        parse_and_validate_project_with_options_with_progress(
+            &merged,
+            SemanticOptions {
+                allow_unknown_procedures: args.allow_unknown_procedures,
+            },
+            Some(&mut analyze_progress_cb),
+        )?
+    };
     if args.allow_unknown_procedures {
         progress.finish();
         eprintln!(
@@ -163,8 +168,31 @@ pub fn parse_and_validate_project_with_options(
     merged: &MergedSource,
     semantic_options: SemanticOptions,
 ) -> Result<(ast::Project, SemanticReport)> {
+    parse_and_validate_project_with_options_with_progress(
+        merged,
+        semantic_options,
+        Option::<&mut fn(usize, usize, &str)>::None,
+    )
+}
+
+fn parse_and_validate_project_with_options_with_progress<F>(
+    merged: &MergedSource,
+    semantic_options: SemanticOptions,
+    mut progress: Option<&mut F>,
+) -> Result<(ast::Project, SemanticReport)>
+where
+    F: FnMut(usize, usize, &str),
+{
     let mut lexer = Lexer::new(&merged.source);
-    let tokens = lexer.tokenize().map_err(|e| {
+    let mut lex_progress_cb = |percent: usize| {
+        report_analysis_progress(
+            &mut progress,
+            percent,
+            100,
+            &format!("Lexing {}%", percent),
+        );
+    };
+    let tokens = lexer.tokenize_with_progress(Some(&mut lex_progress_cb)).map_err(|e| {
         anyhow::anyhow!(format_source_error(
             "Lex error",
             &e.message,
@@ -173,6 +201,7 @@ pub fn parse_and_validate_project_with_options(
             merged,
         ))
     })?;
+    emit_parsing_progress_from_tokens(&tokens, &mut progress);
     let mut parser = SbParser::new(tokens);
     let project = parser.parse_project().map_err(|e| {
         anyhow::anyhow!(format_source_error(
@@ -183,6 +212,7 @@ pub fn parse_and_validate_project_with_options(
             merged,
         ))
     })?;
+    emit_semantic_progress_from_project(&project, &mut progress);
     let semantic_report = semantic_analyze_with_options(&project, semantic_options)
         .map_err(|e| anyhow::anyhow!(format_semantic_error(&e.message, merged)))?;
     Ok((project, semantic_report))
@@ -278,6 +308,223 @@ fn pretty_path(path: &Path) -> String {
     } else {
         raw
     }
+}
+
+fn report_analysis_progress<F>(
+    progress: &mut Option<&mut F>,
+    step: usize,
+    total: usize,
+    label: &str,
+) where
+    F: FnMut(usize, usize, &str),
+{
+    if let Some(cb) = progress.as_deref_mut() {
+        cb(step, total, label);
+    }
+}
+
+fn emit_parsing_progress_from_tokens<F>(
+    tokens: &[lexer::Token],
+    progress: &mut Option<&mut F>,
+) where
+    F: FnMut(usize, usize, &str),
+{
+    let total_tokens = tokens
+        .iter()
+        .filter(|t| t.typ != TokenType::Eof)
+        .count()
+        .max(1);
+    let mut done = 0usize;
+    let mut last_percent = 0usize;
+    for token in tokens {
+        if token.typ == TokenType::Eof {
+            continue;
+        }
+        done += 1;
+        report_phase_percent_with_counts(
+            progress,
+            "Parsing",
+            done,
+            total_tokens,
+            "tokens",
+            &mut last_percent,
+        );
+    }
+    if done == 0 {
+        report_phase_percent_with_counts(
+            progress,
+            "Parsing",
+            1,
+            total_tokens,
+            "tokens",
+            &mut last_percent,
+        );
+    }
+    if last_percent < 100 {
+        report_analysis_progress(
+            progress,
+            total_tokens,
+            total_tokens,
+            &format!("Parsing 100% ({}/{}) tokens", total_tokens, total_tokens),
+        );
+    }
+}
+
+fn emit_semantic_progress_from_project<F>(project: &ast::Project, progress: &mut Option<&mut F>)
+where
+    F: FnMut(usize, usize, &str),
+{
+    let total_checks = count_semantic_statement_checks(project).max(1);
+    let mut done = 0usize;
+    let mut last_percent = 0usize;
+    for target in &project.targets {
+        for procedure in &target.procedures {
+            walk_semantic_statement_checks(
+                &procedure.body,
+                &mut done,
+                total_checks,
+                progress,
+                &mut last_percent,
+            );
+        }
+        for script in &target.scripts {
+            walk_semantic_statement_checks(
+                &script.body,
+                &mut done,
+                total_checks,
+                progress,
+                &mut last_percent,
+            );
+        }
+    }
+    if done == 0 {
+        report_phase_percent_with_counts(
+            progress,
+            "Semantic checks",
+            1,
+            total_checks,
+            "checks",
+            &mut last_percent,
+        );
+    }
+    if last_percent < 100 {
+        report_analysis_progress(
+            progress,
+            total_checks,
+            total_checks,
+            &format!(
+                "Semantic checks 100% ({}/{}) checks",
+                total_checks, total_checks
+            ),
+        );
+    }
+}
+
+fn count_semantic_statement_checks(project: &ast::Project) -> usize {
+    let mut total = 0usize;
+    for target in &project.targets {
+        for procedure in &target.procedures {
+            total += count_statement_checks_recursive(&procedure.body);
+        }
+        for script in &target.scripts {
+            total += count_statement_checks_recursive(&script.body);
+        }
+    }
+    total
+}
+
+fn count_statement_checks_recursive(statements: &[ast::Statement]) -> usize {
+    let mut total = 0usize;
+    for statement in statements {
+        total += 1;
+        match statement {
+            ast::Statement::Repeat { body, .. }
+            | ast::Statement::ForEach { body, .. }
+            | ast::Statement::While { body, .. }
+            | ast::Statement::RepeatUntil { body, .. }
+            | ast::Statement::Forever { body, .. } => {
+                total += count_statement_checks_recursive(body);
+            }
+            ast::Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                total += count_statement_checks_recursive(then_body);
+                total += count_statement_checks_recursive(else_body);
+            }
+            _ => {}
+        }
+    }
+    total
+}
+
+fn walk_semantic_statement_checks<F>(
+    statements: &[ast::Statement],
+    done: &mut usize,
+    total: usize,
+    progress: &mut Option<&mut F>,
+    last_percent: &mut usize,
+) where
+    F: FnMut(usize, usize, &str),
+{
+    for statement in statements {
+        *done += 1;
+        report_phase_percent_with_counts(
+            progress,
+            "Semantic checks",
+            *done,
+            total,
+            "checks",
+            last_percent,
+        );
+        match statement {
+            ast::Statement::Repeat { body, .. }
+            | ast::Statement::ForEach { body, .. }
+            | ast::Statement::While { body, .. }
+            | ast::Statement::RepeatUntil { body, .. }
+            | ast::Statement::Forever { body, .. } => {
+                walk_semantic_statement_checks(body, done, total, progress, last_percent);
+            }
+            ast::Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                walk_semantic_statement_checks(then_body, done, total, progress, last_percent);
+                walk_semantic_statement_checks(else_body, done, total, progress, last_percent);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn report_phase_percent_with_counts<F>(
+    progress: &mut Option<&mut F>,
+    phase: &str,
+    done: usize,
+    total: usize,
+    unit_label: &str,
+    last_percent: &mut usize,
+) where
+    F: FnMut(usize, usize, &str),
+{
+    let total = total.max(1);
+    let done = done.clamp(1, total);
+    let percent = ((done * 100) / total).clamp(1, 100);
+    if percent <= *last_percent {
+        return;
+    }
+    *last_percent = percent;
+    report_analysis_progress(
+        progress,
+        done,
+        total,
+        &format!(
+            "{} {}% ({}/{}) {}",
+            phase, percent, done, total, unit_label
+        ),
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]

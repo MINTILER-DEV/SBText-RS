@@ -741,6 +741,9 @@ fn analyze_expr(
                         ),
                     });
                 };
+                if is_sensing_property_name(remote_var_name) {
+                    return Ok(());
+                }
                 if !remote_target
                     .variables
                     .contains(&remote_var_name.to_lowercase())
@@ -799,6 +802,12 @@ fn analyze_expr(
         }
         Expr::KeyPressed { key, .. } => {
             analyze_expr(target, key, variables, lists, target_infos, param_scope)
+        }
+        Expr::TouchingObject { target: value, .. } => {
+            analyze_expr(target, value, variables, lists, target_infos, param_scope)
+        }
+        Expr::TouchingColor { color, .. } => {
+            analyze_expr(target, color, variables, lists, target_infos, param_scope)
         }
         Expr::BuiltinReporter { .. } | Expr::Number { .. } | Expr::String { .. } => Ok(()),
     }
@@ -881,4 +890,19 @@ fn list_exists_anywhere(target_infos: &HashMap<String, TargetInfo>, lowered_name
 
 fn is_ignored_noop_call(name: &str) -> bool {
     name.eq_ignore_ascii_case("log")
+}
+
+fn is_sensing_property_name(name: &str) -> bool {
+    matches!(
+        name.trim().to_ascii_lowercase().as_str(),
+        "x position"
+            | "y position"
+            | "direction"
+            | "costume #"
+            | "costume name"
+            | "size"
+            | "volume"
+            | "backdrop #"
+            | "backdrop name"
+    )
 }

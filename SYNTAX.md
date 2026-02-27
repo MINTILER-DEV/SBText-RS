@@ -79,7 +79,7 @@ Import line notes:
 
 ### 4.4 Reserved keywords
 
-`add all and answer ask at backdrop bounce broadcast by change clicked contains contents costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop switch then think this timer to turn until var wait when while with x y`
+`add all and answer ask at backdrop bounce broadcast by change clicked contains contents costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not object of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop switch then think this timer to touching turn until var wait when while with x y`
 
 ## 5) File and target structure
 
@@ -94,7 +94,9 @@ At most one stage is allowed.
 Target members:
 
 - `var <name>`
+- `var <name> = <initial_value>`
 - `list <name>`
+- `list <name> = [item1, item2, ...]`
 - `costume "relative/or/absolute/path.svg|.png"`
 - `define ... end`
 - `when ...` scripts
@@ -104,11 +106,12 @@ Example:
 ```sbtext
 stage
   var score
+  var title = "SBText Demo"
 end
 
 sprite Player
-  var hp
-  list inventory
+  var hp = 100
+  list inventory = ["potion", sword, 3]
   costume "assets/player.svg"
 end
 ```
@@ -117,6 +120,9 @@ Notes:
 
 - `stage` name is optional (`stage` defaults to name `Stage`).
 - `sprite stage` is accepted and becomes sprite name `Stage`.
+- Variable initial values accept string/number literals (or bare identifiers treated as strings).
+- List initial values accept comma-separated string/number literals (or bare identifiers treated as strings).
+- Defaults remain Scratch defaults when omitted: variable `0`, list `[]`.
 
 ## 6) Events
 
@@ -321,6 +327,9 @@ length of [list]
 contents of [list]
 [list] contains (expr)
 key (expr) pressed?
+touching (expr)
+touching sprite (expr)
+touching color (expr)
 answer
 mouse x
 mouse y

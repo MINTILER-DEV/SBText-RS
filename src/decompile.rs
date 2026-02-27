@@ -120,11 +120,23 @@ fn read_sb3(input: &Path) -> Result<(Value, HashMap<String, Vec<u8>>)> {
 struct DecompiledTarget {
     name: String,
     is_stage: bool,
-    variables: Vec<String>,
-    lists: Vec<String>,
+    variables: Vec<DecompiledVariableDecl>,
+    lists: Vec<DecompiledListDecl>,
     costumes: Vec<String>,
     procedures: Vec<DecompiledProcedure>,
     scripts: Vec<DecompiledScript>,
+}
+
+#[derive(Debug, Clone)]
+struct DecompiledVariableDecl {
+    name: String,
+    initial_value: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+struct DecompiledListDecl {
+    name: String,
+    initial_items: Option<Vec<Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -152,8 +164,8 @@ fn decompile_target(target: &Value) -> Result<DecompiledTarget> {
         .and_then(Value::as_bool)
         .ok_or_else(|| anyhow!("Target '{}' missing isStage.", name))?;
 
-    let variables = read_decls(target.get("variables"));
-    let lists = read_decls(target.get("lists"));
+    let variables = read_variable_decls(target.get("variables"));
+    let lists = read_list_decls(target.get("lists"));
     let costumes = read_costumes(target.get("costumes"));
 
     let blocks_obj = target
@@ -207,20 +219,57 @@ fn decompile_target(target: &Value) -> Result<DecompiledTarget> {
     })
 }
 
-fn read_decls(node: Option<&Value>) -> Vec<String> {
+fn read_variable_decls(node: Option<&Value>) -> Vec<DecompiledVariableDecl> {
     let mut out = Vec::new();
     let Some(obj) = node.and_then(Value::as_object) else {
         return out;
     };
     for value in obj.values() {
-        if let Some(name) = value
-            .as_array()
-            .and_then(|arr| arr.first())
-            .and_then(Value::as_str)
-            .map(ToString::to_string)
-        {
-            out.push(name);
-        }
+        let Some(arr) = value.as_array() else {
+            continue;
+        };
+        let Some(name) = arr.first().and_then(Value::as_str) else {
+            continue;
+        };
+        let initial_value = arr.get(1).and_then(|v| {
+            if matches!(v, Value::Number(n) if n.as_f64() == Some(0.0)) {
+                None
+            } else {
+                Some(v.clone())
+            }
+        });
+        out.push(DecompiledVariableDecl {
+            name: name.to_string(),
+            initial_value,
+        });
+    }
+    out
+}
+
+fn read_list_decls(node: Option<&Value>) -> Vec<DecompiledListDecl> {
+    let mut out = Vec::new();
+    let Some(obj) = node.and_then(Value::as_object) else {
+        return out;
+    };
+    for value in obj.values() {
+        let Some(arr) = value.as_array() else {
+            continue;
+        };
+        let Some(name) = arr.first().and_then(Value::as_str) else {
+            continue;
+        };
+        let initial_items = arr.get(1).and_then(|v| {
+            let items = v.as_array()?;
+            if items.is_empty() {
+                None
+            } else {
+                Some(items.clone())
+            }
+        });
+        out.push(DecompiledListDecl {
+            name: name.to_string(),
+            initial_items,
+        });
     }
     out
 }
@@ -307,13 +356,13 @@ fn decompile_script(blocks: &Map<String, Value>, hat_id: &str) -> Result<Decompi
         "event_whenbroadcastreceived" => {
             let msg = field_first_string(hat, "BROADCAST_OPTION")
                 .unwrap_or_else(|| "message1".to_string());
-            format!("when I receive [{}]", msg)
+            format!("when I receive [{}]", format_bracket_name(&msg))
         }
         "event_whenkeypressed" => {
             let key = field_first_string(hat, "KEY_OPTION")
                 .or_else(|| key_option(blocks, hat))
                 .unwrap_or_else(|| "space".to_string());
-            format!("when [{}] key pressed", key)
+            format!("when [{}] key pressed", format_bracket_name(&key))
         }
         other => format!("# unsupported event opcode: {}", other),
     };
@@ -363,11 +412,19 @@ fn decompile_statement(
     match op {
         "event_broadcast" => {
             let msg = broadcast_message(blocks, block).unwrap_or_else(|| "message1".to_string());
-            out.push(format!("{}broadcast [{}]", pad, msg));
+            out.push(format!(
+                "{}broadcast [{}]",
+                pad,
+                format_bracket_name(&msg)
+            ));
         }
         "event_broadcastandwait" => {
             let msg = broadcast_message(blocks, block).unwrap_or_else(|| "message1".to_string());
-            out.push(format!("{}broadcast and wait [{}]", pad, msg));
+            out.push(format!(
+                "{}broadcast and wait [{}]",
+                pad,
+                format_bracket_name(&msg)
+            ));
         }
         "data_setvariableto" => {
             let name = field_first_string(block, "VARIABLE").unwrap_or_else(|| "var".to_string());
@@ -841,7 +898,7 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
                 .get(&obj_id)
                 .and_then(|b| field_first_string(b, "OBJECT"))
                 .unwrap_or_else(|| "Sprite".to_string());
-            format!("{}.{}", obj_name, prop)
+            format_var_ref(format!("{}.{}", obj_name, prop))
         }
         "operator_random" => format!(
             "pick random ({}) to ({})",
@@ -869,6 +926,15 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
         "sensing_keypressed" => {
             let key = key_option(blocks, block).unwrap_or_else(|| "space".to_string());
             format!("key ({}) pressed?", quote_str(&key))
+        }
+        "sensing_touchingobject" => {
+            let target = touching_object_option(blocks, block)
+                .unwrap_or_else(|| "mouse-pointer".to_string());
+            format!("touching ({})", quote_str(&target))
+        }
+        "sensing_touchingcolor" => {
+            let color = expr_from_input(blocks, block, "COLOR")?;
+            format!("touching color ({})", color)
         }
         "looks_costume" => {
             let name =
@@ -915,6 +981,18 @@ fn key_option(blocks: &Map<String, Value>, block: &Value) -> Option<String> {
     let menu_id = block_input_block_id(block, "KEY_OPTION")?;
     let menu_block = blocks.get(&menu_id)?;
     field_first_string(menu_block, "KEY_OPTION")
+}
+
+fn touching_object_option(blocks: &Map<String, Value>, block: &Value) -> Option<String> {
+    let menu_id = block_input_block_id(block, "TOUCHINGOBJECTMENU")?;
+    let menu_block = blocks.get(&menu_id)?;
+    let value = field_first_string(menu_block, "TOUCHINGOBJECTMENU")?;
+    Some(match value.as_str() {
+        "_mouse_" => "mouse-pointer".to_string(),
+        "_edge_" => "edge".to_string(),
+        "_myself_" => "myself".to_string(),
+        _ => value,
+    })
 }
 
 fn motion_target_option(
@@ -1117,7 +1195,96 @@ fn is_simple_identifier(name: &str) -> bool {
     if !(first.is_ascii_alphabetic() || first == '_') {
         return false;
     }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '?')
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '?') {
+        return false;
+    }
+    !is_reserved_keyword(name)
+}
+
+fn is_reserved_keyword(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "add"
+            | "all"
+            | "and"
+            | "answer"
+            | "ask"
+            | "at"
+            | "backdrop"
+            | "bounce"
+            | "broadcast"
+            | "by"
+            | "change"
+            | "clicked"
+            | "contains"
+            | "contents"
+            | "costume"
+            | "define"
+            | "delete"
+            | "direction"
+            | "each"
+            | "edge"
+            | "else"
+            | "end"
+            | "flag"
+            | "floor"
+            | "for"
+            | "forever"
+            | "go"
+            | "hide"
+            | "i"
+            | "if"
+            | "in"
+            | "insert"
+            | "item"
+            | "key"
+            | "left"
+            | "length"
+            | "list"
+            | "mouse"
+            | "move"
+            | "next"
+            | "not"
+            | "object"
+            | "of"
+            | "on"
+            | "or"
+            | "pick"
+            | "point"
+            | "pressed"
+            | "random"
+            | "receive"
+            | "repeat"
+            | "replace"
+            | "reset"
+            | "right"
+            | "round"
+            | "say"
+            | "seconds"
+            | "set"
+            | "show"
+            | "size"
+            | "sprite"
+            | "stage"
+            | "steps"
+            | "stop"
+            | "switch"
+            | "then"
+            | "think"
+            | "this"
+            | "timer"
+            | "to"
+            | "touching"
+            | "turn"
+            | "until"
+            | "var"
+            | "wait"
+            | "when"
+            | "while"
+            | "with"
+            | "x"
+            | "y"
+    )
 }
 
 fn quote_str(s: &str) -> String {
@@ -1147,10 +1314,26 @@ fn render_target(target: &DecompiledTarget) -> String {
     }
 
     for var in &target.variables {
-        lines.push(format!("  var {}", format_decl_name(var)));
+        let mut line = format!("  var {}", format_decl_name(&var.name));
+        if let Some(value) = &var.initial_value {
+            line.push_str(" = ");
+            line.push_str(&format_initializer_value(value));
+        }
+        lines.push(line);
     }
     for list in &target.lists {
-        lines.push(format!("  list {}", format_decl_name(list)));
+        let mut line = format!("  list {}", format_decl_name(&list.name));
+        if let Some(items) = &list.initial_items {
+            let rendered_items = items
+                .iter()
+                .map(format_initializer_value)
+                .collect::<Vec<_>>()
+                .join(", ");
+            line.push_str(" = [");
+            line.push_str(&rendered_items);
+            line.push(']');
+        }
+        lines.push(line);
     }
     for costume in &target.costumes {
         lines.push(format!("  costume {}", quote_str(costume)));
@@ -1206,6 +1389,22 @@ fn format_decl_name(name: &str) -> String {
         name.to_string()
     } else {
         quote_str(name)
+    }
+}
+
+fn format_initializer_value(value: &Value) -> String {
+    match value {
+        Value::String(s) => quote_str(s),
+        Value::Number(n) => n.to_string(),
+        Value::Bool(b) => {
+            if *b {
+                quote_str("true")
+            } else {
+                quote_str("false")
+            }
+        }
+        Value::Null => quote_str(""),
+        _ => quote_str(&value.to_string()),
     }
 }
 

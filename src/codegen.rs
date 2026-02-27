@@ -1,6 +1,6 @@
 use crate::ast::{
-    EventScript, EventType, Expr, ListDecl, Position, Procedure, Project, Statement, Target,
-    VariableDecl,
+    EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure, Project,
+    Statement, Target, VariableDecl,
 };
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
@@ -277,10 +277,18 @@ impl<'a> ProjectBuilder<'a> {
                 self.new_id("var")
             };
             local_variables_map.insert(key, var_id.clone());
-            variables_json.insert(var_id, json!([var_decl.name, 0]));
+            let initial = var_decl
+                .initial_value
+                .as_ref()
+                .map(initial_value_json)
+                .unwrap_or_else(|| json!(0));
+            variables_json.insert(var_id, json!([var_decl.name, initial]));
         }
         if target.is_stage {
             for (var_lower, var_id) in &self.global_var_ids {
+                if variables_json.contains_key(var_id) {
+                    continue;
+                }
                 let var_name = self.global_var_names.get(var_lower).ok_or_else(|| {
                     anyhow!("Missing generated global var name for '{}'.", var_lower)
                 })?;
@@ -301,7 +309,14 @@ impl<'a> ProjectBuilder<'a> {
                 self.new_id("list")
             };
             lists_map.insert(key, list_id.clone());
-            lists_json.insert(list_id, json!([list_decl.name, []]));
+            let initial = list_decl
+                .initial_items
+                .as_ref()
+                .map(|items| {
+                    Value::Array(items.iter().map(initial_value_json).collect::<Vec<_>>())
+                })
+                .unwrap_or_else(|| json!([]));
+            lists_json.insert(list_id, json!([list_decl.name, initial]));
         }
 
         let mut variables_map = local_variables_map.clone();
@@ -2208,7 +2223,6 @@ impl<'a> ProjectBuilder<'a> {
         message: &str,
     ) -> Result<String> {
         let block_id = self.new_block_id();
-        let menu_id = self.new_block_id();
         let bid = self.broadcast_id(message);
         blocks.insert(
             block_id.clone(),
@@ -2216,21 +2230,9 @@ impl<'a> ProjectBuilder<'a> {
                 "opcode": "event_broadcast",
                 "next": Value::Null,
                 "parent": parent_id,
-                "inputs": {"BROADCAST_INPUT": [1, menu_id.clone()]},
+                "inputs": {"BROADCAST_INPUT": [1, [11, message, bid]]},
                 "fields": {},
                 "shadow": false,
-                "topLevel": false
-            }),
-        );
-        blocks.insert(
-            menu_id.clone(),
-            json!({
-                "opcode": "event_broadcast_menu",
-                "next": Value::Null,
-                "parent": block_id,
-                "inputs": {},
-                "fields": {"BROADCAST_OPTION": [message, bid]},
-                "shadow": true,
                 "topLevel": false
             }),
         );
@@ -2825,7 +2827,6 @@ impl<'a> ProjectBuilder<'a> {
         message: &str,
     ) -> Result<String> {
         let block_id = self.new_block_id();
-        let menu_id = self.new_block_id();
         let bid = self.broadcast_id(message);
         blocks.insert(
             block_id.clone(),
@@ -2833,21 +2834,9 @@ impl<'a> ProjectBuilder<'a> {
                 "opcode": "event_broadcastandwait",
                 "next": Value::Null,
                 "parent": parent_id,
-                "inputs": {"BROADCAST_INPUT": [1, menu_id.clone()]},
+                "inputs": {"BROADCAST_INPUT": [1, [11, message, bid]]},
                 "fields": {},
                 "shadow": false,
-                "topLevel": false
-            }),
-        );
-        blocks.insert(
-            menu_id,
-            json!({
-                "opcode": "event_broadcast_menu",
-                "next": Value::Null,
-                "parent": block_id.clone(),
-                "inputs": {},
-                "fields": {"BROADCAST_OPTION": [message, bid]},
-                "shadow": true,
                 "topLevel": false
             }),
         );
@@ -3052,6 +3041,29 @@ impl<'a> ProjectBuilder<'a> {
         param_scope: &HashSet<String>,
         default_kind: &str,
     ) -> Result<Value> {
+        if default_kind == "boolean" {
+            if let Some(value) = literal_boolean_value(expr) {
+                let block_id = self.new_block_id();
+                let (left, right) = if value {
+                    (json!([1, [4, "1"]]), json!([1, [4, "1"]]))
+                } else {
+                    (json!([1, [4, "1"]]), json!([1, [4, "0"]]))
+                };
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "operator_equals",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {"OPERAND1": left, "OPERAND2": right},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                return Ok(json!([2, block_id]));
+            }
+        }
         if let Some(literal) = self.literal_input(expr) {
             return Ok(json!([1, literal]));
         }
@@ -3389,6 +3401,55 @@ impl<'a> ProjectBuilder<'a> {
                 );
                 Ok(Some(block_id))
             }
+            Expr::TouchingObject { target, .. } => {
+                let block_id = self.new_block_id();
+                let menu_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "sensing_touchingobject",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {"TOUCHINGOBJECTMENU": [1, menu_id.clone()]},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                let touching_value =
+                    normalize_touching_target_menu(&self.menu_text_from_expr(target, "_mouse_"));
+                blocks.insert(
+                    menu_id,
+                    json!({
+                        "opcode": "sensing_touchingobjectmenu",
+                        "next": Value::Null,
+                        "parent": block_id.clone(),
+                        "inputs": {},
+                        "fields": {"TOUCHINGOBJECTMENU": [touching_value, Value::Null]},
+                        "shadow": true,
+                        "topLevel": false
+                    }),
+                );
+                Ok(Some(block_id))
+            }
+            Expr::TouchingColor { color, .. } => {
+                let block_id = self.new_block_id();
+                let color_input =
+                    self.color_expr_input(blocks, color, &block_id, variables_map, lists_map, param_scope)?;
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "sensing_touchingcolor",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {"COLOR": color_input},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                Ok(Some(block_id))
+            }
             Expr::Unary { op, operand, .. } => {
                 if op == "-" {
                     let block_id = self.new_block_id();
@@ -3609,6 +3670,33 @@ impl<'a> ProjectBuilder<'a> {
             Expr::Number { value, .. } => format_num(*value),
             Expr::Var { name, .. } => name.clone(),
             _ => fallback.to_string(),
+        }
+    }
+
+    fn color_expr_input(
+        &mut self,
+        blocks: &mut Map<String, Value>,
+        expr: &Expr,
+        parent_id: &str,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
+    ) -> Result<Value> {
+        if let Expr::String { value, .. } = expr {
+            return Ok(json!([1, [9, normalize_color_hex(value)]]));
+        }
+        let reporter_id = self.emit_expr_reporter(
+            blocks,
+            expr,
+            parent_id,
+            variables_map,
+            lists_map,
+            param_scope,
+        )?;
+        if let Some(id) = reporter_id {
+            Ok(json!([2, id]))
+        } else {
+            Ok(json!([1, [9, "#000000"]]))
         }
     }
 
@@ -4069,6 +4157,57 @@ fn default_shadow(kind: &str) -> Value {
         json!([4, "0"])
     } else {
         json!([10, ""])
+    }
+}
+
+fn normalize_touching_target_menu(raw: &str) -> String {
+    let lowered = raw.trim().to_ascii_lowercase();
+    match lowered.as_str() {
+        "_mouse_" | "mouse" | "mouse pointer" | "mouse-pointer" => "_mouse_".to_string(),
+        "_edge_" | "edge" => "_edge_".to_string(),
+        "_myself_" | "myself" => "_myself_".to_string(),
+        _ => raw.trim().to_string(),
+    }
+}
+
+fn normalize_color_hex(raw: &str) -> String {
+    let value = raw.trim();
+    if value.len() == 7
+        && value.starts_with('#')
+        && value[1..].chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return value.to_string();
+    }
+    if value.len() == 6 && value.chars().all(|c| c.is_ascii_hexdigit()) {
+        return format!("#{}", value);
+    }
+    "#000000".to_string()
+}
+
+fn initial_value_json(value: &InitialValue) -> Value {
+    match value {
+        InitialValue::Number(n) => json!(n),
+        InitialValue::String(s) => json!(s),
+    }
+}
+
+fn literal_boolean_value(expr: &Expr) -> Option<bool> {
+    match expr {
+        Expr::Number { value, .. } => Some(*value != 0.0),
+        Expr::String { value, .. } => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return Some(false);
+            }
+            if trimmed.eq_ignore_ascii_case("false") {
+                return Some(false);
+            }
+            if let Ok(n) = trimmed.parse::<f64>() {
+                return Some(n != 0.0);
+            }
+            Some(true)
+        }
+        _ => None,
     }
 }
 

@@ -1,6 +1,6 @@
 use crate::ast::{
-    CostumeDecl, EventScript, EventType, Expr, ListDecl, Position, Procedure, Project, Statement,
-    Target, VariableDecl,
+    CostumeDecl, EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure,
+    Project, Statement, Target, VariableDecl,
 };
 use crate::lexer::{Token, TokenType};
 use std::collections::HashSet;
@@ -107,18 +107,34 @@ impl Parser {
             if self.match_keyword("var") {
                 let prev = self.previous().pos;
                 let var_name = self.parse_decl_name_token()?;
+                let initial_value = if self.match_operator("=") {
+                    if self.check_type(TokenType::Newline) || self.check_type(TokenType::Eof) {
+                        Some(InitialValue::String(String::new()))
+                    } else {
+                        Some(self.parse_initializer_value("variable initializer")?)
+                    }
+                } else {
+                    None
+                };
                 target.variables.push(VariableDecl {
                     pos: prev,
                     name: var_name,
+                    initial_value,
                 });
                 continue;
             }
             if self.match_keyword("list") {
                 let prev = self.previous().pos;
                 let list_name = self.parse_decl_name_token()?;
+                let initial_items = if self.match_operator("=") {
+                    Some(self.parse_list_initializer_values()?)
+                } else {
+                    None
+                };
                 target.lists.push(ListDecl {
                     pos: prev,
                     name: list_name,
+                    initial_items,
                 });
                 continue;
             }
@@ -1276,17 +1292,39 @@ impl Parser {
         if self.check_keyword("pick") {
             return self.parse_pick_random_expr();
         }
-        if self.check_keyword("item") {
+        if self.check_keyword("item") && self.peek().typ == TokenType::LParen {
             return self.parse_item_of_list_expr();
         }
-        if self.check_keyword("length") {
+        if self.check_keyword("length")
+            && self
+                .word_at_offset(1)
+                .as_deref()
+                .map(|w| w == "of")
+                .unwrap_or(false)
+        {
             return self.parse_length_expr();
         }
-        if self.check_keyword("contents") {
+        if self.check_keyword("contents")
+            && self
+                .word_at_offset(1)
+                .as_deref()
+                .map(|w| w == "of")
+                .unwrap_or(false)
+        {
             return self.parse_contents_expr();
         }
-        if self.check_keyword("key") {
+        if self.check_keyword("key") && self.peek().typ == TokenType::LParen {
             return self.parse_key_pressed_expr();
+        }
+        if self.check_keyword("touching")
+            && (self.peek().typ == TokenType::LParen
+                || self
+                    .word_at_offset(1)
+                    .as_deref()
+                    .map(|w| w == "color" || w == "sprite" || w == "object")
+                    .unwrap_or(false))
+        {
+            return self.parse_touching_expr();
         }
         if (token.typ == TokenType::Ident || token.typ == TokenType::Keyword)
             && is_math_func_name(&token.value)
@@ -1356,16 +1394,26 @@ impl Parser {
                 });
             }
             self.advance();
+            let mut name = token.value;
+            if self.check_type(TokenType::Op) && self.current().value == "#" {
+                self.advance();
+                name.push_str(" #");
+            }
             return Ok(Expr::Var {
                 pos: token.pos,
-                name: token.value,
+                name,
             });
         }
         if token.typ == TokenType::Keyword {
             self.advance();
+            let mut name = token.value;
+            if self.check_type(TokenType::Op) && self.current().value == "#" {
+                self.advance();
+                name.push_str(" #");
+            }
             return Ok(Expr::Var {
                 pos: token.pos,
-                name: token.value,
+                name,
             });
         }
         if token.typ == TokenType::LParen {
@@ -1467,6 +1515,28 @@ impl Parser {
         })
     }
 
+    fn parse_touching_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self
+            .consume_keyword("touching", "Expected 'touching'.")?
+            .pos;
+        if self.match_keyword("color") {
+            let color = self.parse_wrapped_expression()?;
+            return Ok(Expr::TouchingColor {
+                pos: start,
+                color: Box::new(color),
+            });
+        }
+
+        if self.match_keyword("sprite") || self.match_keyword("object") {
+            // consume optional target qualifier keyword
+        }
+        let target = self.parse_wrapped_expression()?;
+        Ok(Expr::TouchingObject {
+            pos: start,
+            target: Box::new(target),
+        })
+    }
+
     fn parse_variable_field_name(&mut self) -> Result<String, ParseError> {
         let mut contents = self.parse_bracket_tokens()?;
         if contents.is_empty() {
@@ -1538,6 +1608,7 @@ impl Parser {
         let mut out = Vec::new();
         let mut depth_paren: i32 = 0;
         let mut depth_bracket: i32 = 0;
+        let start_pos = self.current().pos;
         while !self.at_end() {
             let token = self.current().clone();
             if token.typ == TokenType::Keyword
@@ -1549,15 +1620,43 @@ impl Parser {
             }
             match token.typ {
                 TokenType::LParen => depth_paren += 1,
-                TokenType::RParen => depth_paren -= 1,
+                TokenType::RParen => {
+                    depth_paren -= 1;
+                    if depth_paren < 0 {
+                        return Err(ParseError {
+                            message: format!(
+                                "Unexpected ')' while reading condition before '{}'.",
+                                keyword
+                            ),
+                            pos: token.pos,
+                        });
+                    }
+                }
                 TokenType::LBracket => depth_bracket += 1,
-                TokenType::RBracket => depth_bracket -= 1,
+                TokenType::RBracket => {
+                    depth_bracket -= 1;
+                    if depth_bracket < 0 {
+                        return Err(ParseError {
+                            message: format!(
+                                "Unexpected ']' while reading condition before '{}'.",
+                                keyword
+                            ),
+                            pos: token.pos,
+                        });
+                    }
+                }
                 _ => {}
             }
             out.push(self.advance());
         }
         if depth_paren != 0 || depth_bracket != 0 {
-            return self.error_here("Unbalanced delimiters while reading condition.");
+            return Err(ParseError {
+                message: format!(
+                    "Unbalanced delimiters while reading condition before '{}', started at line {}, column {}.",
+                    keyword, start_pos.line, start_pos.column
+                ),
+                pos: self.current().pos,
+            });
         }
         Ok(out)
     }
@@ -1566,6 +1665,7 @@ impl Parser {
         let mut out = Vec::new();
         let mut depth_paren: i32 = 0;
         let mut depth_bracket: i32 = 0;
+        let start_pos = self.current().pos;
         while !self.at_end() {
             let token = self.current().clone();
             if token.typ == TokenType::Newline && depth_paren == 0 && depth_bracket == 0 {
@@ -1573,15 +1673,37 @@ impl Parser {
             }
             match token.typ {
                 TokenType::LParen => depth_paren += 1,
-                TokenType::RParen => depth_paren -= 1,
+                TokenType::RParen => {
+                    depth_paren -= 1;
+                    if depth_paren < 0 {
+                        return Err(ParseError {
+                            message: "Unexpected ')' while reading condition.".to_string(),
+                            pos: token.pos,
+                        });
+                    }
+                }
                 TokenType::LBracket => depth_bracket += 1,
-                TokenType::RBracket => depth_bracket -= 1,
+                TokenType::RBracket => {
+                    depth_bracket -= 1;
+                    if depth_bracket < 0 {
+                        return Err(ParseError {
+                            message: "Unexpected ']' while reading condition.".to_string(),
+                            pos: token.pos,
+                        });
+                    }
+                }
                 _ => {}
             }
             out.push(self.advance());
         }
         if depth_paren != 0 || depth_bracket != 0 {
-            return self.error_here("Unbalanced delimiters while reading condition.");
+            return Err(ParseError {
+                message: format!(
+                    "Unbalanced delimiters while reading condition, started at line {}, column {}.",
+                    start_pos.line, start_pos.column
+                ),
+                pos: self.current().pos,
+            });
         }
         Ok(out)
     }
@@ -1605,6 +1727,63 @@ impl Parser {
             return Ok(token.value);
         }
         self.error_here("Expected name.")
+    }
+
+    fn parse_initializer_value(&mut self, context: &str) -> Result<InitialValue, ParseError> {
+        let token = self.current().clone();
+        match token.typ {
+            TokenType::String => {
+                self.advance();
+                Ok(InitialValue::String(token.value))
+            }
+            TokenType::Number => {
+                self.advance();
+                let value = parse_number_literal(&token.value).ok_or_else(|| ParseError {
+                    message: format!("Invalid number in {}.", context),
+                    pos: token.pos,
+                })?;
+                Ok(InitialValue::Number(value))
+            }
+            TokenType::Ident | TokenType::Keyword => {
+                self.advance();
+                Ok(InitialValue::String(token.value))
+            }
+            TokenType::Op if token.value == "-" && self.peek().typ == TokenType::Number => {
+                self.advance();
+                let number = self.advance();
+                let value = parse_number_literal(&number.value).ok_or_else(|| ParseError {
+                    message: format!("Invalid number in {}.", context),
+                    pos: number.pos,
+                })?;
+                Ok(InitialValue::Number(-value))
+            }
+            _ => self.error_here(format!(
+                "Expected string/number literal in {}.",
+                context
+            )),
+        }
+    }
+
+    fn parse_list_initializer_values(&mut self) -> Result<Vec<InitialValue>, ParseError> {
+        self.consume_type(TokenType::LBracket, "Expected '[' after list initializer '='.")?;
+        let mut items = Vec::new();
+        loop {
+            if self.check_type(TokenType::RBracket) {
+                self.advance();
+                break;
+            }
+            items.push(self.parse_initializer_value("list initializer")?);
+            if self.check_type(TokenType::Comma) {
+                self.advance();
+                continue;
+            }
+            if self.check_type(TokenType::RBracket) {
+                self.advance();
+                break;
+            }
+            return self.error_here("Expected ',' or ']' in list initializer.");
+        }
+        Ok(items)
     }
 
     fn parse_sprite_name_token(&mut self) -> Result<String, ParseError> {
@@ -1701,6 +1880,14 @@ impl Parser {
 
     fn match_keyword(&mut self, keyword: &str) -> bool {
         if self.check_keyword(keyword) {
+            self.advance();
+            return true;
+        }
+        false
+    }
+
+    fn match_operator(&mut self, op: &str) -> bool {
+        if self.check_type(TokenType::Op) && self.current().value == op {
             self.advance();
             return true;
         }
