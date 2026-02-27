@@ -500,9 +500,6 @@ impl<'a> ProjectBuilder<'a> {
         for stmt in statements {
             match stmt {
                 Statement::ProcedureCall { name, args, .. } => {
-                    if local_procs.contains_key(&name.to_lowercase()) {
-                        continue;
-                    }
                     if let Some((target_name, proc_name)) = split_qualified(name) {
                         let key = format!(
                             "{}.{}",
