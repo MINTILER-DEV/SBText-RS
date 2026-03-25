@@ -107,40 +107,40 @@
     add ("z") to [dict_codes]
 
     add ("-120") to [dict_values]
-    add ("aa") to [dict_codes]
+    add ("~") to [dict_codes]
 
     add ("120") to [dict_values]
-    add ("ab") to [dict_codes]
+    add ("!") to [dict_codes]
 
     add ("midspin") to [dict_values]
-    add ("ac") to [dict_codes]
+    add ("@") to [dict_codes]
 
     add ("|||") to [dict_values]
-    add ("ad") to [dict_codes]
+    add ("#") to [dict_codes]
 
     add ("||") to [dict_values]
-    add ("ae") to [dict_codes]
+    add ("$") to [dict_codes]
 
     add ("nextoffset") to [dict_values]
-    add ("af") to [dict_codes]
+    add ("%") to [dict_codes]
 
     add ("quad") to [dict_values]
-    add ("ag") to [dict_codes]
+    add ("^") to [dict_codes]
 
     add ("cubic") to [dict_values]
-    add ("ah") to [dict_codes]
+    add ("&") to [dict_codes]
 
     add ("inout") to [dict_values]
-    add ("ai") to [dict_codes]
+    add ("*") to [dict_codes]
 
     add ("out") to [dict_values]
-    add ("aj") to [dict_codes]
+    add ("(") to [dict_codes]
 
     add ("in") to [dict_values]
-    add ("ak") to [dict_codes]
+    add (")") to [dict_codes]
 
     add ("linear") to [dict_values]
-    add ("al") to [dict_codes]
+    add ("_") to [dict_codes]
   end
 
   define dictionary_encode
@@ -179,7 +179,7 @@
       set [matched] to (0)
 
       # explicit ||| token
-      if <(item (i) of [encoded_tokens]) = ("ad")> then
+      if <(item (i) of [encoded_tokens]) = ("#")> then
         add ("@d") to [pattern_stage1]
         change [i] by (1)
         set [matched] to (1)
@@ -187,7 +187,7 @@
 
       # explicit || token
       if <(matched) = (0)> then
-        if <(item (i) of [encoded_tokens]) = ("ae")> then
+        if <(item (i) of [encoded_tokens]) = ("$")> then
           add ("@s") to [pattern_stage1]
           change [i] by (1)
           set [matched] to (1)
@@ -334,12 +334,12 @@
 
     # Expand @d: ||| (triple delimiter)
     if <(pattern_marker) = ("d")> then
-      add ("ad") to [pattern_tokens]
+      add ("#") to [pattern_tokens]
     end
 
     # Expand @s: || (double delimiter)
     if <(pattern_marker) = ("s")> then
-      add ("ae") to [pattern_tokens]
+      add ("$") to [pattern_tokens]
     end
   end
 
