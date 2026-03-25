@@ -141,6 +141,25 @@
 
     add ("linear") to [dict_values]
     add ("_") to [dict_codes]
+
+    # Pattern markers (compress to single characters)
+    add ("@p1") to [dict_values]
+    add ("{") to [dict_codes]
+
+    add ("@p2") to [dict_values]
+    add ("}") to [dict_codes]
+
+    add ("@p3") to [dict_values]
+    add ("[") to [dict_codes]
+
+    add ("@z4") to [dict_values]
+    add ("]") to [dict_codes]
+
+    add ("@d") to [dict_values]
+    add ("-") to [dict_codes]
+
+    add ("@s") to [dict_values]
+    add ("+") to [dict_codes]
   end
 
   define dictionary_encode
@@ -179,7 +198,7 @@
       set [matched] to (0)
 
       # explicit ||| token
-      if <(item (i) of [encoded_tokens]) = ("#")> then
+      if <(item (i) of [encoded_tokens]) = ("-")> then
         add ("@d") to [pattern_stage1]
         change [i] by (1)
         set [matched] to (1)
@@ -187,7 +206,7 @@
 
       # explicit || token
       if <(matched) = (0)> then
-        if <(item (i) of [encoded_tokens]) = ("$")> then
+        if <(item (i) of [encoded_tokens]) = ("+")> then
           add ("@s") to [pattern_stage1]
           change [i] by (1)
           set [matched] to (1)
@@ -343,7 +362,7 @@
     end
   end
 
-  define decompress_rle
+  define !decompress_rle (compressed_string)
     # Expands run-length encoding in compressed_tokens
     delete all of [pattern_tokens]
     set [i] to (1)
@@ -367,28 +386,28 @@
           end
         end
       else
-        # Check for and expand pattern markers
-        if <(current_token) = ("@p1")> then
+        # Check for and expand pattern markers (single-character codes)
+        if <(current_token) = ("{")> then
           set [pattern_marker] to ("p1")
           expand_patterns
         else
-          if <(current_token) = ("@p2")> then
+          if <(current_token) = ("}")> then
             set [pattern_marker] to ("p2")
             expand_patterns
           else
-            if <(current_token) = ("@p3")> then
+            if <(current_token) = ("[")> then
               set [pattern_marker] to ("p3")
               expand_patterns
             else
-              if <(current_token) = ("@z4")> then
+              if <(current_token) = ("]")> then
                 set [pattern_marker] to ("z4")
                 expand_patterns
               else
-                if <(current_token) = ("@d")> then
+                if <(current_token) = ("-")> then
                   set [pattern_marker] to ("d")
                   expand_patterns
                 else
-                  if <(current_token) = ("@s")> then
+                  if <(current_token) = ("+")> then
                     set [pattern_marker] to ("s")
                     expand_patterns
                   else
@@ -440,7 +459,7 @@
     end
   end
 
-  define compress_level
+  define !compress_level (level_string)
     load_dictionary
     dictionary_encode
     apply_patterns
@@ -452,7 +471,7 @@
   end
 
   when flag clicked
-    compress_level
+    compress_level ("")
     say (contents of [compressed_tokens])
     say (compression_ratio)
   end
