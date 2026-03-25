@@ -1757,15 +1757,15 @@ impl Parser {
                 })?;
                 Ok(InitialValue::Number(-value))
             }
-            _ => self.error_here(format!(
-                "Expected string/number literal in {}.",
-                context
-            )),
+            _ => self.error_here(format!("Expected string/number literal in {}.", context)),
         }
     }
 
     fn parse_list_initializer_values(&mut self) -> Result<Vec<InitialValue>, ParseError> {
-        self.consume_type(TokenType::LBracket, "Expected '[' after list initializer '='.")?;
+        self.consume_type(
+            TokenType::LBracket,
+            "Expected '[' after list initializer '='.",
+        )?;
         let mut items = Vec::new();
         loop {
             if self.check_type(TokenType::RBracket) {

@@ -73,8 +73,8 @@ pub fn read_sbtc_bytes(bytes: &[u8]) -> Result<(MergedSource, Option<PathBuf>)> 
     let merged_source = read_zip_entry_text(&mut zip, "merged.sbtext")?;
     let line_map_text = read_zip_entry_text(&mut zip, "line_map.json")?;
 
-    let manifest: Value = serde_json::from_str(&manifest_text)
-        .context("Invalid manifest.json in .sbtc archive.")?;
+    let manifest: Value =
+        serde_json::from_str(&manifest_text).context("Invalid manifest.json in .sbtc archive.")?;
     let format = manifest
         .get("format")
         .and_then(Value::as_str)
@@ -106,8 +106,8 @@ pub fn read_sbtc_bytes(bytes: &[u8]) -> Result<(MergedSource, Option<PathBuf>)> 
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from);
 
-    let line_map: Value = serde_json::from_str(&line_map_text)
-        .context("Invalid line_map.json in .sbtc archive.")?;
+    let line_map: Value =
+        serde_json::from_str(&line_map_text).context("Invalid line_map.json in .sbtc archive.")?;
     let origins = line_map
         .get("origins")
         .and_then(Value::as_array)
@@ -137,7 +137,10 @@ pub fn read_sbtc_bytes(bytes: &[u8]) -> Result<(MergedSource, Option<PathBuf>)> 
         );
     }
 
-    Ok((MergedSource::new(merged_source, line_origins, entry_file), source_dir))
+    Ok((
+        MergedSource::new(merged_source, line_origins, entry_file),
+        source_dir,
+    ))
 }
 
 fn read_zip_entry_text<R: Read + std::io::Seek>(
@@ -148,7 +151,8 @@ fn read_zip_entry_text<R: Read + std::io::Seek>(
         .by_name(name)
         .with_context(|| format!("Missing '{}' in .sbtc archive.", name))?;
     let mut text = String::new();
-    entry.read_to_string(&mut text)
+    entry
+        .read_to_string(&mut text)
         .with_context(|| format!("Failed reading '{}' from .sbtc archive.", name))?;
     Ok(text)
 }

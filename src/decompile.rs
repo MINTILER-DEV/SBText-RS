@@ -412,11 +412,7 @@ fn decompile_statement(
     match op {
         "event_broadcast" => {
             let msg = broadcast_message(blocks, block).unwrap_or_else(|| "message1".to_string());
-            out.push(format!(
-                "{}broadcast [{}]",
-                pad,
-                format_bracket_name(&msg)
-            ));
+            out.push(format!("{}broadcast [{}]", pad, format_bracket_name(&msg)));
         }
         "event_broadcastandwait" => {
             let msg = broadcast_message(blocks, block).unwrap_or_else(|| "message1".to_string());

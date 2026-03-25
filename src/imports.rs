@@ -116,7 +116,11 @@ pub fn resolve_merged_source_with_map(entry: &Path) -> Result<MergedSource> {
     ))
 }
 
-fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathBuf, ResolvedFile>) -> Result<ResolvedFile> {
+fn resolve_file(
+    path: &Path,
+    stack: &mut Vec<PathBuf>,
+    cache: &mut HashMap<PathBuf, ResolvedFile>,
+) -> Result<ResolvedFile> {
     let current = path
         .canonicalize()
         .map_err(|_| anyhow::anyhow!("Input file not found: '{}'.", path.display()))?;
@@ -199,8 +203,11 @@ fn resolve_file(path: &Path, stack: &mut Vec<PathBuf>, cache: &mut HashMap<PathB
 }
 
 fn parse_file(source: &str, source_path: &Path) -> Result<ParsedFile> {
-    let import_re = Regex::new(r#"^\s*import\s+\[(?P<name>[^\]\r\n]+)\]\s+from\s+"(?P<path>[^"\r\n]+)"\s*(?:#.*)?$"#)?;
-    let sprite_re = Regex::new(r#"^\s*sprite\s+(?P<name>"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\s*(?:#.*)?$"#)?;
+    let import_re = Regex::new(
+        r#"^\s*import\s+\[(?P<name>[^\]\r\n]+)\]\s+from\s+"(?P<path>[^"\r\n]+)"\s*(?:#.*)?$"#,
+    )?;
+    let sprite_re =
+        Regex::new(r#"^\s*sprite\s+(?P<name>"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\s*(?:#.*)?$"#)?;
     let stage_re = Regex::new(r#"^\s*stage(?:\s+("[^"]+"|[A-Za-z_][A-Za-z0-9_]*))?\s*(?:#.*)?$"#)?;
 
     let mut imports = Vec::new();
