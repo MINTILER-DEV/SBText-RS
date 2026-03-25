@@ -40,6 +40,8 @@ sbtext-rs INPUT --emit-merged merged.sbtext
 sbtext-rs INPUT --emit-sbtc bundle.sbtc
 sbtext-rs INPUT.sbtc OUTPUT.sb3
 sbtext-rs INPUT OUTPUT --compile-sbtc
+sbtext-rs INPUT OUTPUT.sprite3
+sbtext-rs INPUT OUTPUT.sprite3 --sprite-name Player
 sbtext-rs INPUT.sb3 --decompile
 sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
 ```
@@ -68,6 +70,14 @@ sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
   - manifest (`manifest.json`)
 - Build one from normal input with `--emit-sbtc`.
 - Compile directly from `.sbtc` by using it as CLI input.
+
+## Sprite Export (`.sprite3`)
+
+- Set `OUTPUT` to a `.sprite3` path to export a Scratch sprite package.
+- If the project has exactly one sprite, it exports automatically.
+- If there are multiple sprites:
+  - pass `--sprite-name <NAME>`, or
+  - run interactively and the CLI will prompt you to choose.
 
 ## SB3 Decompile
 

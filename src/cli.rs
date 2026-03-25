@@ -36,6 +36,13 @@ pub struct Args {
 
     #[arg(
         long,
+        value_name = "NAME",
+        help = "Sprite name to export when OUTPUT is .sprite3."
+    )]
+    pub sprite_name: Option<String>,
+
+    #[arg(
+        long,
         help = "Use Python backend instead of native Rust backend (parity checks only)."
     )]
     pub python_backend: bool,

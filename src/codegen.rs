@@ -1,6 +1,6 @@
 use crate::ast::{
-    EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure, Project,
-    Statement, Target, VariableDecl,
+    EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure, Project, Statement,
+    Target, VariableDecl,
 };
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
@@ -114,6 +114,173 @@ where
     }
     zip.finish()?;
     Ok(buffer.into_inner())
+}
+
+pub fn write_sprite3(
+    project: &Project,
+    source_dir: &Path,
+    output_path: &Path,
+    sprite_name: &str,
+    options: CodegenOptions,
+) -> Result<()> {
+    write_sprite3_with_progress(
+        project,
+        source_dir,
+        output_path,
+        sprite_name,
+        options,
+        Option::<&mut fn(usize, usize, &str)>::None,
+    )
+}
+
+pub fn write_sprite3_with_progress<F>(
+    project: &Project,
+    source_dir: &Path,
+    output_path: &Path,
+    sprite_name: &str,
+    options: CodegenOptions,
+    progress: Option<&mut F>,
+) -> Result<()>
+where
+    F: FnMut(usize, usize, &str),
+{
+    let bytes =
+        build_sprite3_bytes_with_progress(project, source_dir, sprite_name, options, progress)?;
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(output_path, bytes)?;
+    Ok(())
+}
+
+pub fn build_sprite3_bytes(
+    project: &Project,
+    source_dir: &Path,
+    sprite_name: &str,
+    options: CodegenOptions,
+) -> Result<Vec<u8>> {
+    build_sprite3_bytes_with_progress(
+        project,
+        source_dir,
+        sprite_name,
+        options,
+        Option::<&mut fn(usize, usize, &str)>::None,
+    )
+}
+
+pub fn build_sprite3_bytes_with_progress<F>(
+    project: &Project,
+    source_dir: &Path,
+    sprite_name: &str,
+    options: CodegenOptions,
+    progress: Option<&mut F>,
+) -> Result<Vec<u8>>
+where
+    F: FnMut(usize, usize, &str),
+{
+    let mut progress = progress.map(|cb| cb as &mut CodegenProgressCallback<'_>);
+    let mut builder = ProjectBuilder::new(project, source_dir, options);
+    let (project_json, assets) = builder.build_with_progress(&mut progress)?;
+
+    report_progress(&mut progress, 1, 1, "Selecting sprite target");
+    let sprite_json = select_sprite_target_json(&project_json, sprite_name)?;
+    let mut asset_names = collect_target_asset_names(&sprite_json)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    asset_names.sort();
+
+    let mut buffer = Cursor::new(Vec::<u8>::new());
+    let mut zip = zip::ZipWriter::new(&mut buffer);
+    let opts = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+
+    report_progress(&mut progress, 1, 1, "Writing sprite.json");
+    zip.start_file("sprite.json", opts)?;
+    let sprite_bytes = serde_json::to_vec_pretty(&sprite_json)?;
+    zip.write_all(&sprite_bytes)?;
+
+    let asset_total = asset_names.len().max(1);
+    if asset_names.is_empty() {
+        report_progress(&mut progress, 1, 1, "Packaging assets");
+    }
+    for (index, asset_name) in asset_names.into_iter().enumerate() {
+        let bytes = assets.get(&asset_name).ok_or_else(|| {
+            anyhow!(
+                "Sprite asset '{}' is missing from generated asset set.",
+                asset_name
+            )
+        })?;
+        zip.start_file(asset_name, opts)?;
+        zip.write_all(bytes)?;
+        report_progress(&mut progress, index + 1, asset_total, "Packaging assets");
+    }
+
+    zip.finish()?;
+    Ok(buffer.into_inner())
+}
+
+fn select_sprite_target_json(project_json: &Value, sprite_name: &str) -> Result<Value> {
+    let wanted = sprite_name.trim();
+    if wanted.is_empty() {
+        bail!("Sprite name cannot be empty when exporting .sprite3.");
+    }
+    let targets = project_json
+        .get("targets")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("Generated project JSON is missing 'targets' array."))?;
+
+    let mut available = Vec::new();
+    for target in targets {
+        let is_stage = target
+            .get("isStage")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let name = target
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        if !is_stage {
+            available.push(name.clone());
+            if name.eq_ignore_ascii_case(wanted) {
+                return Ok(target.clone());
+            }
+        }
+    }
+
+    if available.is_empty() {
+        bail!("Cannot export .sprite3: project has no sprites.");
+    }
+    bail!(
+        "Sprite '{}' not found. Available sprites: {}",
+        wanted,
+        available.join(", ")
+    )
+}
+
+fn collect_target_asset_names(target_json: &Value) -> Result<HashSet<String>> {
+    let mut names = HashSet::new();
+    collect_asset_names_from_array(target_json, "costumes", &mut names)?;
+    collect_asset_names_from_array(target_json, "sounds", &mut names)?;
+    Ok(names)
+}
+
+fn collect_asset_names_from_array(
+    target_json: &Value,
+    key: &str,
+    out: &mut HashSet<String>,
+) -> Result<()> {
+    let Some(arr) = target_json.get(key).and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for item in arr {
+        let Some(md5ext) = item.get("md5ext").and_then(Value::as_str) else {
+            continue;
+        };
+        if !md5ext.trim().is_empty() {
+            out.insert(md5ext.to_string());
+        }
+    }
+    Ok(())
 }
 
 fn report_progress(
@@ -312,9 +479,7 @@ impl<'a> ProjectBuilder<'a> {
             let initial = list_decl
                 .initial_items
                 .as_ref()
-                .map(|items| {
-                    Value::Array(items.iter().map(initial_value_json).collect::<Vec<_>>())
-                })
+                .map(|items| Value::Array(items.iter().map(initial_value_json).collect::<Vec<_>>()))
                 .unwrap_or_else(|| json!([]));
             lists_json.insert(list_id, json!([list_decl.name, initial]));
         }
@@ -859,9 +1024,10 @@ impl<'a> ProjectBuilder<'a> {
                     json!({"BROADCAST_OPTION": [msg.clone(), bid]}),
                 )
             }
-            EventType::WhenKeyPressed(key_name) => {
-                ("event_whenkeypressed", json!({"KEY_OPTION": [key_name.clone(), Value::Null]}))
-            }
+            EventType::WhenKeyPressed(key_name) => (
+                "event_whenkeypressed",
+                json!({"KEY_OPTION": [key_name.clone(), Value::Null]}),
+            ),
         };
         let hat_id = self.new_block_id();
         blocks.insert(
@@ -3431,8 +3597,14 @@ impl<'a> ProjectBuilder<'a> {
             }
             Expr::TouchingColor { color, .. } => {
                 let block_id = self.new_block_id();
-                let color_input =
-                    self.color_expr_input(blocks, color, &block_id, variables_map, lists_map, param_scope)?;
+                let color_input = self.color_expr_input(
+                    blocks,
+                    color,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                )?;
                 blocks.insert(
                     block_id.clone(),
                     json!({

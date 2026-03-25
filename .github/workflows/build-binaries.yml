@@ -1,0 +1,64 @@
+name: Build Binaries
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            artifact_suffix: windows-x64
+            bin_name: sbtext-rs.exe
+            archive_ext: zip
+          - name: linux-x64
+            os: ubuntu-latest
+            artifact_suffix: linux-x64
+            bin_name: sbtext-rs
+            archive_ext: tar.gz
+          - name: macos-arm64
+            os: macos-latest
+            artifact_suffix: macos-arm64
+            bin_name: sbtext-rs
+            archive_ext: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release --locked
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item "target/release/${{ matrix.bin_name }}" "dist/${{ matrix.bin_name }}"
+          Compress-Archive -Path "dist/${{ matrix.bin_name }}" -DestinationPath "sbtext-rs-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}" -Force
+
+      - name: Package binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/release/${{ matrix.bin_name }}" "dist/${{ matrix.bin_name }}"
+          tar -czf "sbtext-rs-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}" -C dist "${{ matrix.bin_name }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbtext-rs-${{ matrix.artifact_suffix }}
+          path: sbtext-rs-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}
+          if-no-files-found: error

@@ -21,8 +21,8 @@ use imports::{resolve_merged_source_with_map, MergedSource};
 use lexer::{Lexer, TokenType};
 use parser::Parser as SbParser;
 use semantic::{
-    analyze as semantic_analyze, analyze_with_options as semantic_analyze_with_options, SemanticOptions,
-    SemanticReport,
+    analyze as semantic_analyze, analyze_with_options as semantic_analyze_with_options,
+    SemanticOptions, SemanticReport,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use std::io::{self, IsTerminal, Write};
@@ -36,6 +36,9 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
     if args.decompile {
         if args.python_backend {
             anyhow::bail!("--python-backend cannot be used with --decompile.");
+        }
+        if args.sprite_name.is_some() {
+            anyhow::bail!("--sprite-name cannot be used with --decompile.");
         }
         if args.emit_merged.is_some() {
             anyhow::bail!("--emit-merged cannot be used with --decompile.");
@@ -70,10 +73,17 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
     if args.split_sprites {
         anyhow::bail!("--split-sprites requires --decompile.");
     }
+    let output_is_sprite3 = args.output.as_deref().map(is_sprite3_path).unwrap_or(false);
+    if args.sprite_name.is_some() && !output_is_sprite3 {
+        anyhow::bail!("--sprite-name is only supported when OUTPUT is .sprite3.");
+    }
     if args.python_backend && args.allow_unknown_procedures {
         anyhow::bail!(
             "--allow-unknown-procedures is only supported by the native Rust backend (remove --python-backend)."
         );
+    }
+    if args.python_backend && output_is_sprite3 {
+        anyhow::bail!("--python-backend is not supported with .sprite3 output.");
     }
 
     let mut progress = CliProgress::new("Compile");
@@ -130,6 +140,15 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         sbtc::write_sbtc_file(&merged, &compile_source_dir, emit_path)?;
     }
 
+    let sprite3_target_name = if output_is_sprite3 {
+        Some(select_sprite_target_name_for_export(
+            &project,
+            args.sprite_name.as_deref(),
+        )?)
+    } else {
+        None
+    };
+
     if let Some(output) = &args.output {
         if args.python_backend {
             progress.emit("Building .sb3 (Python backend)", 1, 1);
@@ -139,7 +158,23 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
                 scale_svgs: !args.no_svg_scale,
                 allow_unknown_procedures: args.allow_unknown_procedures,
             };
-            let result = {
+            let result = if output_is_sprite3 {
+                let sprite_name = sprite3_target_name.as_deref().ok_or_else(|| {
+                    anyhow::anyhow!("Missing selected sprite name for .sprite3 export.")
+                })?;
+                progress.emit("Building .sprite3", 1, 1);
+                let mut codegen_progress_cb = |step: usize, total: usize, label: &str| {
+                    progress.emit(label, step, total);
+                };
+                codegen::write_sprite3_with_progress(
+                    &project,
+                    &compile_source_dir,
+                    output,
+                    sprite_name,
+                    options,
+                    Some(&mut codegen_progress_cb),
+                )
+            } else {
                 let mut codegen_progress_cb = |step: usize, total: usize, label: &str| {
                     progress.emit(label, step, total);
                 };
@@ -202,7 +237,11 @@ pub fn compile_sbtc_bytes_to_sb3_bytes(
     )
 }
 
-pub fn compile_source_to_sb3_bytes(source: &str, source_dir: &Path, scale_svgs: bool) -> Result<Vec<u8>> {
+pub fn compile_source_to_sb3_bytes(
+    source: &str,
+    source_dir: &Path,
+    scale_svgs: bool,
+) -> Result<Vec<u8>> {
     let project = parse_and_validate_source(source)?;
     codegen::build_sb3_bytes(
         &project,
@@ -240,22 +279,19 @@ where
 {
     let mut lexer = Lexer::new(&merged.source);
     let mut lex_progress_cb = |percent: usize| {
-        report_analysis_progress(
-            &mut progress,
-            percent,
-            100,
-            &format!("Lexing {}%", percent),
-        );
+        report_analysis_progress(&mut progress, percent, 100, &format!("Lexing {}%", percent));
     };
-    let tokens = lexer.tokenize_with_progress(Some(&mut lex_progress_cb)).map_err(|e| {
-        anyhow::anyhow!(format_source_error(
-            "Lex error",
-            &e.message,
-            e.pos.line,
-            e.pos.column,
-            merged,
-        ))
-    })?;
+    let tokens = lexer
+        .tokenize_with_progress(Some(&mut lex_progress_cb))
+        .map_err(|e| {
+            anyhow::anyhow!(format_source_error(
+                "Lex error",
+                &e.message,
+                e.pos.line,
+                e.pos.column,
+                merged,
+            ))
+        })?;
     emit_parsing_progress_from_tokens(&tokens, &mut progress);
     let mut parser = SbParser::new(tokens);
     let project = parser.parse_project().map_err(|e| {
@@ -298,12 +334,21 @@ pub fn parse_and_validate_source(source: &str) -> Result<ast::Project> {
 
 pub fn canonicalize_file(path: &Path) -> Result<PathBuf> {
     if !path.exists() || !path.is_file() {
-        return Err(anyhow::anyhow!("Input file not found: '{}'.", path.display()));
+        return Err(anyhow::anyhow!(
+            "Input file not found: '{}'.",
+            path.display()
+        ));
     }
     Ok(path.canonicalize()?)
 }
 
-fn format_source_error(kind: &str, message: &str, line: usize, column: usize, merged: &MergedSource) -> String {
+fn format_source_error(
+    kind: &str,
+    message: &str,
+    line: usize,
+    column: usize,
+    merged: &MergedSource,
+) -> String {
     let mapped = merged.map_position(line, column);
     format!(
         "{}: {} (file '{}', line {}, column {})",
@@ -366,10 +411,7 @@ fn pretty_path(path: &Path) -> String {
 }
 
 fn default_source_dir_for_input(input: &Path) -> PathBuf {
-    input
-        .parent()
-        .unwrap_or(input)
-        .to_path_buf()
+    input.parent().unwrap_or(input).to_path_buf()
 }
 
 fn is_sbtc_path(path: &Path) -> bool {
@@ -377,6 +419,82 @@ fn is_sbtc_path(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.eq_ignore_ascii_case("sbtc"))
         .unwrap_or(false)
+}
+
+fn is_sprite3_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("sprite3"))
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn select_sprite_target_name_for_export(
+    project: &ast::Project,
+    requested_name: Option<&str>,
+) -> Result<String> {
+    let sprite_names = project
+        .targets
+        .iter()
+        .filter(|t| !t.is_stage)
+        .map(|t| t.name.clone())
+        .collect::<Vec<_>>();
+
+    if sprite_names.is_empty() {
+        anyhow::bail!("Cannot export .sprite3: project has no sprites.");
+    }
+
+    if let Some(name) = requested_name {
+        if let Some(found) = sprite_names
+            .iter()
+            .find(|candidate| candidate.eq_ignore_ascii_case(name.trim()))
+        {
+            return Ok(found.clone());
+        }
+        anyhow::bail!(
+            "Sprite '{}' not found. Available sprites: {}",
+            name,
+            sprite_names.join(", ")
+        );
+    }
+
+    if sprite_names.len() == 1 {
+        return Ok(sprite_names[0].clone());
+    }
+
+    if !io::stdin().is_terminal() {
+        anyhow::bail!(
+            "Multiple sprites found ({}). Re-run with --sprite-name <NAME>.",
+            sprite_names.join(", ")
+        );
+    }
+
+    eprintln!("Multiple sprites found in the project:");
+    for name in &sprite_names {
+        eprintln!(" - {}", name);
+    }
+
+    loop {
+        print!("Enter sprite name to export as .sprite3: ");
+        io::stdout().flush()?;
+        let mut input = String::new();
+        let read = io::stdin().read_line(&mut input)?;
+        if read == 0 {
+            anyhow::bail!("No sprite name provided.");
+        }
+        let chosen = input.trim();
+        if let Some(found) = sprite_names
+            .iter()
+            .find(|candidate| candidate.eq_ignore_ascii_case(chosen))
+        {
+            return Ok(found.clone());
+        }
+        eprintln!(
+            "Sprite '{}' not found. Available sprites: {}",
+            chosen,
+            sprite_names.join(", ")
+        );
+    }
 }
 
 fn report_analysis_progress<F>(
@@ -392,10 +510,8 @@ fn report_analysis_progress<F>(
     }
 }
 
-fn emit_parsing_progress_from_tokens<F>(
-    tokens: &[lexer::Token],
-    progress: &mut Option<&mut F>,
-) where
+fn emit_parsing_progress_from_tokens<F>(tokens: &[lexer::Token], progress: &mut Option<&mut F>)
+where
     F: FnMut(usize, usize, &str),
 {
     let total_tokens = tokens
@@ -589,10 +705,7 @@ fn report_phase_percent_with_counts<F>(
         progress,
         done,
         total,
-        &format!(
-            "{} {}% ({}/{}) {}",
-            phase, percent, done, total, unit_label
-        ),
+        &format!("{} {}% ({}/{}) {}", phase, percent, done, total, unit_label),
     );
 }
 
