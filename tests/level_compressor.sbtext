@@ -9,6 +9,10 @@
   var original_size
   var compressed_size
   var compression_ratio
+  var result_text
+  var pattern_marker
+  var pattern_num
+  var compressed_input
 
   list level_tokens = ["45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "0", "", "", "-45", "", "", "0", "speed", "4", "0", "", "", "0", "", "", "0", "", "", "0", "speed", ".5", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "-90", "", "", "135", "", "", "135", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "90", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "-90", "", "", "135", "", "", "135", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "speed", "2", "0", "", "", "0", "twirl", "", "0", "", "", "0", "speed", ".5", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "90", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "-90", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "90", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "speed", "2", "0", "", "", "0", "twirl", "", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 0.8 quad inout", "0", "", "", "0", "", "", "0", "", "", "0", "", "", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 1 quad inout", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 1 quad inout", "0", "", "", "-180", "movenextoffset", "0 160 1 quad inout", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "-180", "movenextoffset", "0 160 1 quad inout", "90", "", "", "90", "", "", "0", "", "", "-180", "movenextoffset", "0 255 1 quad inout", "-90", "", "", "90", "", "", "60", "", "", "60", "", "", "60", "", "", "0", "", "", "0", "", "", "-180", "", "", ""]
   list dict_values
@@ -290,7 +294,123 @@
     end
   end
 
-  var result_text
+  define expand_patterns
+    # Expand @p1: g|b|b|b|g|a (45 90 90 90 45 0)
+    if <(pattern_marker) = ("p1")> then
+      add ("g") to [pattern_tokens]
+      add ("b") to [pattern_tokens]
+      add ("b") to [pattern_tokens]
+      add ("b") to [pattern_tokens]
+      add ("g") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+    end
+
+    # Expand @p2: e|e|b|b|a|a (135 135 90 90 0 0)
+    if <(pattern_marker) = ("p2")> then
+      add ("e") to [pattern_tokens]
+      add ("e") to [pattern_tokens]
+      add ("b") to [pattern_tokens]
+      add ("b") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+    end
+
+    # Expand @p3: d|d|c|c|a|a (-135 -135 -90 -90 0 0)
+    if <(pattern_marker) = ("p3")> then
+      add ("d") to [pattern_tokens]
+      add ("d") to [pattern_tokens]
+      add ("c") to [pattern_tokens]
+      add ("c") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+    end
+
+    # Expand @z4: a|a|a|a (0 0 0 0)
+    if <(pattern_marker) = ("z4")> then
+      add ("a") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+      add ("a") to [pattern_tokens]
+    end
+
+    # Expand @d: ||| (triple delimiter)
+    if <(pattern_marker) = ("d")> then
+      add ("ad") to [pattern_tokens]
+    end
+
+    # Expand @s: || (double delimiter)
+    if <(pattern_marker) = ("s")> then
+      add ("ae") to [pattern_tokens]
+    end
+  end
+
+  define decompress_rle
+    # Expands run-length encoding in compressed_tokens
+    delete all of [pattern_tokens]
+    set [i] to (1)
+
+    while <(i) <= (length of [compressed_tokens])>
+      set [current_token] to (item (i) of [compressed_tokens])
+
+      # Check for run-length marker
+      if <(current_token) = ("~r")> then
+        set [i] to ((i) + (1))
+        if <(i) <= (length of [compressed_tokens])> then
+          set [run_token] to (item (i) of [compressed_tokens])
+          set [i] to ((i) + (1))
+          if <(i) <= (length of [compressed_tokens])> then
+            set [run_count] to (item (i) of [compressed_tokens])
+            
+            # Add token run_count times
+            repeat (run_count)
+              add (run_token) to [pattern_tokens]
+            end
+          end
+        end
+      else
+        # Check for and expand pattern markers
+        if <(current_token) = ("@p1")> then
+          set [pattern_marker] to ("p1")
+          expand_patterns
+        else
+          if <(current_token) = ("@p2")> then
+            set [pattern_marker] to ("p2")
+            expand_patterns
+          else
+            if <(current_token) = ("@p3")> then
+              set [pattern_marker] to ("p3")
+              expand_patterns
+            else
+              if <(current_token) = ("@z4")> then
+                set [pattern_marker] to ("z4")
+                expand_patterns
+              else
+                if <(current_token) = ("@d")> then
+                  set [pattern_marker] to ("d")
+                  expand_patterns
+                else
+                  if <(current_token) = ("@s")> then
+                    set [pattern_marker] to ("s")
+                    expand_patterns
+                  else
+                    add (current_token) to [pattern_tokens]
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+      change [i] by (1)
+    end
+
+    # Copy decompressed tokens back to compressed_tokens
+    delete all of [compressed_tokens]
+    set [i] to (1)
+    while <(i) <= (length of [pattern_tokens])>
+      add (item (i) of [pattern_tokens]) to [compressed_tokens]
+      change [i] by (1)
+    end
+  end
 
   define tokens_to_text
     set [result_text] to ("")
@@ -301,19 +421,19 @@
       set [lookup_index] to (0)
       set [j] to (1)
 
-      # Look up token in dict_codes
-      while <((j) <= (length of [dict_codes])) and ((lookup_index) = (0))>
-        if <(current_token) = (item (j) of [dict_codes])> then
+      # Look up token in dict_values (swapped - now contains the codes)
+      while <((j) <= (length of [dict_values])) and ((lookup_index) = (0))>
+        if <(current_token) = (item (j) of [dict_values])> then
           set [lookup_index] to (j)
         end
         change [j] by (1)
       end
 
-      # Build text string by joining decoded values
+      # Build text string by joining decoded values (swapped - get from dict_codes)
       if <(lookup_index) = (0)> then
         set [result_text] to (join (result_text) with (current_token))
       else
-        set [result_text] to (join (result_text) with (item (lookup_index) of [dict_values]))
+        set [result_text] to (join (result_text) with (item (lookup_index) of [dict_codes]))
       end
 
       change [i] by (1)
