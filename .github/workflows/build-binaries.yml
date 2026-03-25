@@ -2,14 +2,96 @@ name: Build Binaries
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (for example: 1.2.1 or v1.2.1)"
+        required: true
+        type: string
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
+  prepare-release-notes:
+    name: Prepare Release Notes
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.normalize.outputs.version }}
+      tag_name: ${{ steps.normalize.outputs.tag_name }}
+      notes_source: ${{ steps.notes.outputs.notes_source }}
+      notes_repo_path: ${{ steps.notes.outputs.notes_repo_path }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Normalize version
+        id: normalize
+        shell: bash
+        run: |
+          raw="${{ github.event.inputs.version }}"
+          version="${raw#v}"
+          if [ -z "$version" ]; then
+            echo "Version cannot be empty."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve or generate release notes
+        id: notes
+        shell: bash
+        run: |
+          version="${{ steps.normalize.outputs.version }}"
+          notes_repo_path="notes/RELEASE_NOTES_${version}.md"
+          notes_tmp_path="$RUNNER_TEMP/release_notes.md"
+
+          if [ -f "$notes_repo_path" ]; then
+            cp "$notes_repo_path" "$notes_tmp_path"
+            echo "notes_source=existing-file" >> "$GITHUB_OUTPUT"
+          else
+            mkdir -p notes
+            last_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+            {
+              echo "# Release Notes ${version}"
+              echo
+              echo "## Highlights"
+              echo "- Generated automatically. Review before publishing."
+              echo
+              echo "## Changes"
+              if [ -n "$last_tag" ]; then
+                git log --pretty='- %s (%h)' "${last_tag}"..HEAD
+              else
+                git log --pretty='- %s (%h)'
+              fi
+              echo
+              echo "## Notes"
+              echo "- This file was generated because ${notes_repo_path} was missing."
+            } > "$notes_tmp_path"
+            cp "$notes_tmp_path" "$notes_repo_path"
+            echo "notes_source=generated-new-file" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "notes_repo_path=$notes_repo_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release notes body
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes-body
+          path: ${{ runner.temp }}/release_notes.md
+          if-no-files-found: error
+
+      - name: Upload generated notes file
+        if: steps.notes.outputs.notes_source == 'generated-new-file'
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-release-notes-file
+          path: ${{ steps.notes.outputs.notes_repo_path }}
+          if-no-files-found: error
+
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
+    needs: prepare-release-notes
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +128,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           Copy-Item "target/release/${{ matrix.bin_name }}" "dist/${{ matrix.bin_name }}"
-          Compress-Archive -Path "dist/${{ matrix.bin_name }}" -DestinationPath "sbtext-rs-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}" -Force
+          Compress-Archive -Path "dist/${{ matrix.bin_name }}" -DestinationPath "sbtext-rs-v${{ needs.prepare-release-notes.outputs.version }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}" -Force
 
       - name: Package binary (Unix)
         if: runner.os != 'Windows'
@@ -54,11 +136,39 @@ jobs:
         run: |
           mkdir -p dist
           cp "target/release/${{ matrix.bin_name }}" "dist/${{ matrix.bin_name }}"
-          tar -czf "sbtext-rs-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}" -C dist "${{ matrix.bin_name }}"
+          tar -czf "sbtext-rs-v${{ needs.prepare-release-notes.outputs.version }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}" -C dist "${{ matrix.bin_name }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: sbtext-rs-${{ matrix.artifact_suffix }}
-          path: sbtext-rs-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}
+          path: sbtext-rs-v${{ needs.prepare-release-notes.outputs.version }}-${{ matrix.artifact_suffix }}.${{ matrix.archive_ext }}
           if-no-files-found: error
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs:
+      - prepare-release-notes
+      - build
+    steps:
+      - name: Download release notes body
+        uses: actions/download-artifact@v4
+        with:
+          name: release-notes-body
+          path: release-meta
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sbtext-rs-*
+          path: dist-release
+          merge-multiple: true
+
+      - name: Create or update GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare-release-notes.outputs.tag_name }}
+          name: SBText-RS v${{ needs.prepare-release-notes.outputs.version }}
+          body_path: release-meta/release_notes.md
+          files: dist-release/*
