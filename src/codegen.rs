@@ -3619,6 +3619,42 @@ impl<'a> ProjectBuilder<'a> {
                 );
                 Ok(Some(block_id))
             }
+            Expr::StringJoin { text1, text2, .. } => {
+                let block_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "operator_join",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                let text1_input = self.expr_input(
+                    blocks,
+                    text1,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
+                let text2_input = self.expr_input(
+                    blocks,
+                    text2,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
+                set_block_input(blocks, &block_id, "STRING1", text1_input)?;
+                set_block_input(blocks, &block_id, "STRING2", text2_input)?;
+                Ok(Some(block_id))
+            }
             Expr::Unary { op, operand, .. } => {
                 if op == "-" {
                     let block_id = self.new_block_id();

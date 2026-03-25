@@ -326,6 +326,7 @@ item (index) of [list]
 length of [list]
 contents of [list]
 [list] contains (expr)
+join (text1) with (text2)
 key (expr) pressed?
 touching (expr)
 touching sprite (expr)

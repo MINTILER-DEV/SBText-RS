@@ -809,6 +809,10 @@ fn analyze_expr(
         Expr::TouchingColor { color, .. } => {
             analyze_expr(target, color, variables, lists, target_infos, param_scope)
         }
+        Expr::StringJoin { text1, text2, .. } => {
+            analyze_expr(target, text1, variables, lists, target_infos, param_scope)?;
+            analyze_expr(target, text2, variables, lists, target_infos, param_scope)
+        }
         Expr::BuiltinReporter { .. } | Expr::Number { .. } | Expr::String { .. } => Ok(()),
     }
 }

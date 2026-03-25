@@ -1326,6 +1326,9 @@ impl Parser {
         {
             return self.parse_touching_expr();
         }
+        if self.check_keyword("join") && self.peek().typ == TokenType::LParen {
+            return self.parse_join_expr();
+        }
         if (token.typ == TokenType::Ident || token.typ == TokenType::Keyword)
             && is_math_func_name(&token.value)
             && self.peek().typ == TokenType::LParen
@@ -1534,6 +1537,18 @@ impl Parser {
         Ok(Expr::TouchingObject {
             pos: start,
             target: Box::new(target),
+        })
+    }
+
+    fn parse_join_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self.consume_keyword("join", "Expected 'join'.")?.pos;
+        let text1 = self.parse_wrapped_expression()?;
+        self.consume_keyword("with", "Expected 'with' in 'join (...) with (...)'.")?;
+        let text2 = self.parse_wrapped_expression()?;
+        Ok(Expr::StringJoin {
+            pos: start,
+            text1: Box::new(text1),
+            text2: Box::new(text2),
         })
     }
 

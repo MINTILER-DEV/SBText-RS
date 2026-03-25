@@ -61,6 +61,11 @@ pub enum Expr {
         pos: Position,
         color: Box<Expr>,
     },
+    StringJoin {
+        pos: Position,
+        text1: Box<Expr>,
+        text2: Box<Expr>,
+    },
     BuiltinReporter {
         pos: Position,
         kind: String,
@@ -97,6 +102,7 @@ impl Expr {
             | Expr::KeyPressed { pos, .. }
             | Expr::TouchingObject { pos, .. }
             | Expr::TouchingColor { pos, .. }
+            | Expr::StringJoin { pos, .. }
             | Expr::BuiltinReporter { pos, .. }
             | Expr::MathFunc { pos, .. }
             | Expr::Unary { pos, .. }

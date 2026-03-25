@@ -476,6 +476,7 @@ fn keyword_set() -> HashSet<&'static str> {
         "in",
         "insert",
         "item",
+        "join",
         "key",
         "left",
         "layer",

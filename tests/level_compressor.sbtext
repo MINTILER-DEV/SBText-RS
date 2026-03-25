@@ -1,0 +1,340 @@
+﻿sprite LevelCompressor
+  var i
+  var j
+  var matched
+  var lookup_index
+  var current_token
+  var run_token
+  var run_count
+  var original_size
+  var compressed_size
+  var compression_ratio
+
+  list level_tokens = ["45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "0", "", "", "-45", "", "", "0", "speed", "4", "0", "", "", "0", "", "", "0", "", "", "0", "speed", ".5", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "-90", "", "", "135", "", "", "135", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "90", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "-90", "", "", "135", "", "", "135", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "speed", "2", "0", "", "", "0", "twirl", "", "0", "", "", "0", "speed", ".5", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "90", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "-90", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "90", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "speed", "2", "0", "", "", "0", "twirl", "", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 0.8 quad inout", "0", "", "", "0", "", "", "0", "", "", "0", "", "", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 1 quad inout", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 1 quad inout", "0", "", "", "-180", "movenextoffset", "0 160 1 quad inout", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "-180", "movenextoffset", "0 160 1 quad inout", "90", "", "", "90", "", "", "0", "", "", "-180", "movenextoffset", "0 255 1 quad inout", "-90", "", "", "90", "", "", "60", "", "", "60", "", "", "60", "", "", "0", "", "", "0", "", "", "-180", "", "", ""]
+  list dict_values
+  list dict_codes
+  list encoded_tokens
+  list pattern_stage1
+  list pattern_tokens
+  list compressed_tokens
+
+  define load_dictionary
+    delete all of [dict_values]
+    delete all of [dict_codes]
+
+    # Core level numbers and keywords
+    add ("0") to [dict_values]
+    add ("a") to [dict_codes]
+
+    add ("90") to [dict_values]
+    add ("b") to [dict_codes]
+
+    add ("-90") to [dict_values]
+    add ("c") to [dict_codes]
+
+    add ("-135") to [dict_values]
+    add ("d") to [dict_codes]
+
+    add ("135") to [dict_values]
+    add ("e") to [dict_codes]
+
+    add ("-180") to [dict_values]
+    add ("f") to [dict_codes]
+
+    add ("45") to [dict_values]
+    add ("g") to [dict_codes]
+
+    add ("movenextoffset") to [dict_values]
+    add ("h") to [dict_codes]
+
+    add ("speed") to [dict_values]
+    add ("i") to [dict_codes]
+
+    add ("60") to [dict_values]
+    add ("j") to [dict_codes]
+
+    add ("2") to [dict_values]
+    add ("k") to [dict_codes]
+
+    add ("0 80 1 quad inout") to [dict_values]
+    add ("l") to [dict_codes]
+
+    add ("0 160 1 quad inout") to [dict_values]
+    add ("m") to [dict_codes]
+
+    add ("twirl") to [dict_values]
+    add ("n") to [dict_codes]
+
+    add (".5") to [dict_values]
+    add ("o") to [dict_codes]
+
+    add ("0 80 0.8 quad inout") to [dict_values]
+    add ("p") to [dict_codes]
+
+    add ("0 255 1 quad inout") to [dict_values]
+    add ("q") to [dict_codes]
+
+    add ("4") to [dict_values]
+    add ("r") to [dict_codes]
+
+    add ("-45") to [dict_values]
+    add ("s") to [dict_codes]
+
+    add ("") to [dict_values]
+    add ("t") to [dict_codes]
+
+    # Additional keyword set
+    add ("180") to [dict_values]
+    add ("u") to [dict_codes]
+
+    add ("-210") to [dict_values]
+    add ("v") to [dict_codes]
+
+    add ("210") to [dict_values]
+    add ("w") to [dict_codes]
+
+    add ("-30") to [dict_values]
+    add ("x") to [dict_codes]
+
+    add ("30") to [dict_values]
+    add ("y") to [dict_codes]
+
+    add ("-60") to [dict_values]
+    add ("z") to [dict_codes]
+
+    add ("-120") to [dict_values]
+    add ("aa") to [dict_codes]
+
+    add ("120") to [dict_values]
+    add ("ab") to [dict_codes]
+
+    add ("midspin") to [dict_values]
+    add ("ac") to [dict_codes]
+
+    add ("|||") to [dict_values]
+    add ("ad") to [dict_codes]
+
+    add ("||") to [dict_values]
+    add ("ae") to [dict_codes]
+
+    add ("nextoffset") to [dict_values]
+    add ("af") to [dict_codes]
+
+    add ("quad") to [dict_values]
+    add ("ag") to [dict_codes]
+
+    add ("cubic") to [dict_values]
+    add ("ah") to [dict_codes]
+
+    add ("inout") to [dict_values]
+    add ("ai") to [dict_codes]
+
+    add ("out") to [dict_values]
+    add ("aj") to [dict_codes]
+
+    add ("in") to [dict_values]
+    add ("ak") to [dict_codes]
+
+    add ("linear") to [dict_values]
+    add ("al") to [dict_codes]
+  end
+
+  define dictionary_encode
+    delete all of [encoded_tokens]
+
+    set [i] to (1)
+    while <(i) <= (length of [level_tokens])>
+      set [current_token] to (item (i) of [level_tokens])
+      set [lookup_index] to (0)
+      set [j] to (1)
+
+      while <((j) <= (length of [dict_values])) and ((lookup_index) = (0))>
+        if <(current_token) = (item (j) of [dict_values])> then
+          set [lookup_index] to (j)
+        end
+        change [j] by (1)
+      end
+
+      if <(lookup_index) = (0)> then
+        add (current_token) to [encoded_tokens]
+      else
+        add (item (lookup_index) of [dict_codes]) to [encoded_tokens]
+      end
+
+      change [i] by (1)
+    end
+  end
+
+  define apply_patterns
+    delete all of [pattern_stage1]
+    delete all of [pattern_tokens]
+
+    # Pass 1: normalize delimiters into compact symbols
+    set [i] to (1)
+    while <(i) <= (length of [encoded_tokens])>
+      set [matched] to (0)
+
+      # explicit ||| token
+      if <(item (i) of [encoded_tokens]) = ("ad")> then
+        add ("@d") to [pattern_stage1]
+        change [i] by (1)
+        set [matched] to (1)
+      end
+
+      # explicit || token
+      if <(matched) = (0)> then
+        if <(item (i) of [encoded_tokens]) = ("ae")> then
+          add ("@s") to [pattern_stage1]
+          change [i] by (1)
+          set [matched] to (1)
+        end
+      end
+
+      # split-token format for ||| (empty + empty)
+      if <(matched) = (0)> then
+        if <((i) + (1)) <= (length of [encoded_tokens])> then
+          if <((item (i) of [encoded_tokens]) = ("t")) and ((item ((i) + (1)) of [encoded_tokens]) = ("t"))> then
+            add ("@d") to [pattern_stage1]
+            change [i] by (2)
+            set [matched] to (1)
+          end
+        end
+      end
+
+      # split-token format for || (single empty)
+      if <(matched) = (0)> then
+        if <(item (i) of [encoded_tokens]) = ("t")> then
+          add ("@s") to [pattern_stage1]
+          change [i] by (1)
+          set [matched] to (1)
+        end
+      end
+
+      if <(matched) = (0)> then
+        add (item (i) of [encoded_tokens]) to [pattern_stage1]
+        change [i] by (1)
+      end
+    end
+
+    # Pass 2: replace frequent motifs after delimiter collapse
+    set [i] to (1)
+    while <(i) <= (length of [pattern_stage1])>
+      set [matched] to (0)
+
+      if <((i) + (10)) <= (length of [pattern_stage1])> then
+        if <((item (i) of [pattern_stage1]) = ("g")) and ((item ((i) + (1)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (2)) of [pattern_stage1]) = ("b")) and ((item ((i) + (3)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (4)) of [pattern_stage1]) = ("b")) and ((item ((i) + (5)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (6)) of [pattern_stage1]) = ("b")) and ((item ((i) + (7)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (8)) of [pattern_stage1]) = ("g")) and ((item ((i) + (9)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (10)) of [pattern_stage1]) = ("a"))> then
+          add ("@p1") to [pattern_tokens]
+          change [i] by (11)
+          set [matched] to (1)
+        end
+
+        if <(matched) = (0)> then
+          if <((item (i) of [pattern_stage1]) = ("e")) and ((item ((i) + (1)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (2)) of [pattern_stage1]) = ("e")) and ((item ((i) + (3)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (4)) of [pattern_stage1]) = ("b")) and ((item ((i) + (5)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (6)) of [pattern_stage1]) = ("b")) and ((item ((i) + (7)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (8)) of [pattern_stage1]) = ("a")) and ((item ((i) + (9)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (10)) of [pattern_stage1]) = ("a"))> then
+            add ("@p2") to [pattern_tokens]
+            change [i] by (11)
+            set [matched] to (1)
+          end
+        end
+
+        if <(matched) = (0)> then
+          if <((item (i) of [pattern_stage1]) = ("d")) and ((item ((i) + (1)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (2)) of [pattern_stage1]) = ("d")) and ((item ((i) + (3)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (4)) of [pattern_stage1]) = ("c")) and ((item ((i) + (5)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (6)) of [pattern_stage1]) = ("c")) and ((item ((i) + (7)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (8)) of [pattern_stage1]) = ("a")) and ((item ((i) + (9)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (10)) of [pattern_stage1]) = ("a"))> then
+            add ("@p3") to [pattern_tokens]
+            change [i] by (11)
+            set [matched] to (1)
+          end
+        end
+      end
+
+      if <(matched) = (0)> then
+        if <((i) + (6)) <= (length of [pattern_stage1])> then
+          if <((item (i) of [pattern_stage1]) = ("a")) and ((item ((i) + (1)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (2)) of [pattern_stage1]) = ("a")) and ((item ((i) + (3)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (4)) of [pattern_stage1]) = ("a")) and ((item ((i) + (5)) of [pattern_stage1]) = ("@d")) and ((item ((i) + (6)) of [pattern_stage1]) = ("a"))> then
+            add ("@z4") to [pattern_tokens]
+            change [i] by (7)
+            set [matched] to (1)
+          end
+        end
+      end
+
+      if <(matched) = (0)> then
+        add (item (i) of [pattern_stage1]) to [pattern_tokens]
+        change [i] by (1)
+      end
+    end
+  end
+
+  define apply_rle
+    delete all of [compressed_tokens]
+
+    set [i] to (1)
+    while <(i) <= (length of [pattern_tokens])>
+      set [run_token] to (item (i) of [pattern_tokens])
+      set [run_count] to (1)
+      set [j] to ((i) + (1))
+
+      while <((j) <= (length of [pattern_tokens])) and ((item (j) of [pattern_tokens]) = (run_token))>
+        change [run_count] by (1)
+        change [j] by (1)
+      end
+
+      if <(run_count) >= (3)> then
+        add ("~r") to [compressed_tokens]
+        add (run_token) to [compressed_tokens]
+        add (run_count) to [compressed_tokens]
+      else
+        repeat (run_count)
+          add (run_token) to [compressed_tokens]
+        end
+      end
+
+      set [i] to (j)
+    end
+  end
+
+  var result_text
+
+  define tokens_to_text
+    set [result_text] to ("")
+    set [i] to (1)
+
+    while <(i) <= (length of [compressed_tokens])>
+      set [current_token] to (item (i) of [compressed_tokens])
+      set [lookup_index] to (0)
+      set [j] to (1)
+
+      # Look up token in dict_codes
+      while <((j) <= (length of [dict_codes])) and ((lookup_index) = (0))>
+        if <(current_token) = (item (j) of [dict_codes])> then
+          set [lookup_index] to (j)
+        end
+        change [j] by (1)
+      end
+
+      # Build text string by joining decoded values
+      if <(lookup_index) = (0)> then
+        set [result_text] to (join (result_text) with (current_token))
+      else
+        set [result_text] to (join (result_text) with (item (lookup_index) of [dict_values]))
+      end
+
+      change [i] by (1)
+    end
+  end
+
+  define compress_level
+    load_dictionary
+    dictionary_encode
+    apply_patterns
+    apply_rle
+
+    set [original_size] to (length of [level_tokens])
+    set [compressed_size] to (length of [compressed_tokens])
+    set [compression_ratio] to ((compressed_size) / (original_size))
+  end
+
+  when flag clicked
+    compress_level
+    say (contents of [compressed_tokens])
+    say (compression_ratio)
+  end
+end
+
