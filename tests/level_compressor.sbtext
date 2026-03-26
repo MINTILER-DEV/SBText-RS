@@ -15,7 +15,9 @@
   var compressed_input
   var split_token
   var split_char
+  var token
   var sep_and_decoded
+  var decoded
 
   list level_tokens = ["45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "90", "", "", "90", "", "", "90", "", "", "45", "", "", "0", "", "", "45", "", "", "0", "", "", "-45", "", "", "0", "speed", "4", "0", "", "", "0", "", "", "0", "", "", "0", "speed", ".5", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "-90", "", "", "135", "", "", "135", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "90", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "-90", "", "", "135", "", "", "135", "", "", "90", "", "", "0", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "135", "", "", "135", "", "", "90", "", "", "90", "", "", "0", "speed", "2", "0", "", "", "0", "twirl", "", "0", "", "", "0", "speed", ".5", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "90", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "-90", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "90", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "0", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "", "", "0", "", "", "-135", "", "", "-135", "", "", "-90", "", "", "-90", "", "", "0", "speed", "2", "0", "", "", "0", "twirl", "", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 0.8 quad inout", "0", "", "", "0", "", "", "0", "", "", "0", "", "", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 1 quad inout", "90", "", "", "90", "", "", "-180", "movenextoffset", "0 80 1 quad inout", "0", "", "", "-180", "movenextoffset", "0 160 1 quad inout", "90", "", "", "90", "", "", "0", "", "", "0", "", "", "-180", "movenextoffset", "0 160 1 quad inout", "90", "", "", "90", "", "", "0", "", "", "-180", "movenextoffset", "0 255 1 quad inout", "-90", "", "", "90", "", "", "60", "", "", "60", "", "", "60", "", "", "0", "", "", "0", "", "", "-180", "", "", ""]
   list input_tokens
@@ -513,21 +515,9 @@
   # Wrapper: parse a '|' separated level text into level_tokens and compress
   define compress (level_text)
     delete all of [level_tokens]
-    set [split_token] to ("")
-    set [i] to (1)
-    set [split_char] to (letter (i) of (level_text))
-    repeat until <(split_char) = ("")>
-      if <(split_char) = ("|")> then
-        add (split_token) to [level_tokens]
-        set [split_token] to ("")
-      else
-        set [split_token] to (join (split_token) with (split_char))
-      end
-      change [i] by (1)
-      set [split_char] to (letter (i) of (level_text))
+    for each token in (split (level_text) by ("|"))
+      add (token) to [level_tokens]
     end
-    # add final token (handles empty last token)
-    add (split_token) to [level_tokens]
     compress_level
   end
 
@@ -535,20 +525,9 @@
   # produce a '|' separated level text in `result_text`.
   define decompress (compressed_text)
     delete all of [compressed_tokens]
-    set [split_token] to ("")
-    set [i] to (1)
-    set [split_char] to (letter (i) of (compressed_text))
-    repeat until <(split_char) = ("")>
-      if <(split_char) = ("|")> then
-        add (split_token) to [compressed_tokens]
-        set [split_token] to ("")
-      else
-        set [split_token] to (join (split_token) with (split_char))
-      end
-      change [i] by (1)
-      set [split_char] to (letter (i) of (compressed_text))
+    for each token in (split (compressed_text) by ("|"))
+      add (token) to [compressed_tokens]
     end
-    add (split_token) to [compressed_tokens]
 
     decompress_rle
     tokens_to_text_sep
