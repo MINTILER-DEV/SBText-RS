@@ -813,6 +813,15 @@ fn analyze_expr(
             analyze_expr(target, text1, variables, lists, target_infos, param_scope)?;
             analyze_expr(target, text2, variables, lists, target_infos, param_scope)
         }
+        Expr::StringSplit { text, sep, .. } => {
+            analyze_expr(target, text, variables, lists, target_infos, param_scope)?;
+            analyze_expr(target, sep, variables, lists, target_infos, param_scope)
+        }
+        Expr::Substring { text, start, end, .. } => {
+            analyze_expr(target, text, variables, lists, target_infos, param_scope)?;
+            analyze_expr(target, start, variables, lists, target_infos, param_scope)?;
+            analyze_expr(target, end, variables, lists, target_infos, param_scope)
+        }
         Expr::BuiltinReporter { .. } | Expr::Number { .. } | Expr::String { .. } => Ok(()),
     }
 }

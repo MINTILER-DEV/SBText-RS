@@ -327,6 +327,8 @@ length of [list]
 contents of [list]
 [list] contains (expr)
 join (text1) with (text2)
+split (text) by (sep)
+substring (text) from (start) to (end)
 key (expr) pressed?
 touching (expr)
 touching sprite (expr)

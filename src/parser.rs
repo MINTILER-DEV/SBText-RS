@@ -1326,6 +1326,12 @@ impl Parser {
         {
             return self.parse_touching_expr();
         }
+        if self.check_keyword("split") && self.peek().typ == TokenType::LParen {
+            return self.parse_split_expr();
+        }
+        if self.check_keyword("substring") && self.peek().typ == TokenType::LParen {
+            return self.parse_substring_expr();
+        }
         if self.check_keyword("join") && self.peek().typ == TokenType::LParen {
             return self.parse_join_expr();
         }
@@ -1549,6 +1555,33 @@ impl Parser {
             pos: start,
             text1: Box::new(text1),
             text2: Box::new(text2),
+        })
+    }
+
+    fn parse_split_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self.consume_keyword("split", "Expected 'split'.")?.pos;
+        let text = self.parse_wrapped_expression()?;
+        self.consume_keyword("by", "Expected 'by' in 'split (...) by (...)'.")?;
+        let sep = self.parse_wrapped_expression()?;
+        Ok(Expr::StringSplit {
+            pos: start,
+            text: Box::new(text),
+            sep: Box::new(sep),
+        })
+    }
+
+    fn parse_substring_expr(&mut self) -> Result<Expr, ParseError> {
+        let start = self.consume_keyword("substring", "Expected 'substring'.")?.pos;
+        let text = self.parse_wrapped_expression()?;
+        self.consume_keyword("from", "Expected 'from' in 'substring (...) from (...) to (...)'.")?;
+        let start_expr = self.parse_wrapped_expression()?;
+        self.consume_keyword("to", "Expected 'to' in 'substring (...) from (...) to (...)'.")?;
+        let end_expr = self.parse_wrapped_expression()?;
+        Ok(Expr::Substring {
+            pos: start,
+            text: Box::new(text),
+            start: Box::new(start_expr),
+            end: Box::new(end_expr),
         })
     }
 

@@ -3655,6 +3655,88 @@ impl<'a> ProjectBuilder<'a> {
                 set_block_input(blocks, &block_id, "STRING2", text2_input)?;
                 Ok(Some(block_id))
             }
+            Expr::StringSplit { text, sep, .. } => {
+                let block_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "operator_split",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                let text_input = self.expr_input(
+                    blocks,
+                    text,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
+                let sep_input = self.expr_input(
+                    blocks,
+                    sep,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
+                set_block_input(blocks, &block_id, "STRING", text_input)?;
+                set_block_input(blocks, &block_id, "SEP", sep_input)?;
+                Ok(Some(block_id))
+            }
+            Expr::Substring { text, start, end, .. } => {
+                let block_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "operator_substring",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                let text_input = self.expr_input(
+                    blocks,
+                    text,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
+                let from_input = self.expr_input(
+                    blocks,
+                    start,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?;
+                let to_input = self.expr_input(
+                    blocks,
+                    end,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "number",
+                )?;
+                set_block_input(blocks, &block_id, "STRING", text_input)?;
+                set_block_input(blocks, &block_id, "FROM", from_input)?;
+                set_block_input(blocks, &block_id, "TO", to_input)?;
+                Ok(Some(block_id))
+            }
             Expr::Unary { op, operand, .. } => {
                 if op == "-" {
                     let block_id = self.new_block_id();

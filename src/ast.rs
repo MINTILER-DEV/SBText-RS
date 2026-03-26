@@ -66,6 +66,17 @@ pub enum Expr {
         text1: Box<Expr>,
         text2: Box<Expr>,
     },
+    StringSplit {
+        pos: Position,
+        text: Box<Expr>,
+        sep: Box<Expr>,
+    },
+    Substring {
+        pos: Position,
+        text: Box<Expr>,
+        start: Box<Expr>,
+        end: Box<Expr>,
+    },
     BuiltinReporter {
         pos: Position,
         kind: String,
@@ -103,6 +114,8 @@ impl Expr {
             | Expr::TouchingObject { pos, .. }
             | Expr::TouchingColor { pos, .. }
             | Expr::StringJoin { pos, .. }
+            | Expr::StringSplit { pos, .. }
+            | Expr::Substring { pos, .. }
             | Expr::BuiltinReporter { pos, .. }
             | Expr::MathFunc { pos, .. }
             | Expr::Unary { pos, .. }
