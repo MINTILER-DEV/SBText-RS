@@ -1,6 +1,6 @@
 use crate::ast::{
     CostumeDecl, EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure,
-    Project, Statement, Target, VariableDecl,
+    Project, Statement, Target, VariableDecl, ReporterDecl,
 };
 use crate::lexer::{Token, TokenType};
 use std::collections::HashSet;
@@ -92,6 +92,7 @@ impl Parser {
             costumes: Vec::new(),
             procedures: Vec::new(),
             scripts: Vec::new(),
+            reporters: Vec::new(),
         };
         loop {
             self.skip_newlines();
@@ -153,6 +154,11 @@ impl Parser {
                 target.procedures.push(self.parse_procedure(prev)?);
                 continue;
             }
+            if self.match_keyword("reporter") {
+                let prev = self.previous().pos;
+                target.reporters.push(self.parse_reporter(prev)?);
+                continue;
+            }
             if self.match_keyword("when") {
                 let prev = self.previous().pos;
                 target.scripts.push(self.parse_event_script(prev)?);
@@ -192,6 +198,55 @@ impl Parser {
             name,
             params,
             run_without_screen_refresh,
+            body,
+        })
+    }
+
+    fn parse_reporter(&mut self, pos: Position) -> Result<ReporterDecl, ParseError> {
+        let name = self.parse_decl_name_token()?;
+
+        let mut params = Vec::new();
+        // parse parameter groups like `(param)` and optional `by (param)` separators
+        while self.check_type(TokenType::LParen) {
+            self.consume_type(TokenType::LParen, "Expected '('.")?;
+            let param = self.parse_decl_name_token()?;
+            self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
+            params.push(param);
+            // allow repeated 'by' ( ... ) groups
+            while self.match_keyword("by") {
+                self.consume_type(TokenType::LParen, "Expected '(' after 'by'.")?;
+                let param = self.parse_decl_name_token()?;
+                self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
+                params.push(param);
+            }
+        }
+
+        self.skip_newlines();
+
+        let mut return_name = None;
+        if self.match_keyword("returns") {
+            self.consume_type(TokenType::LParen, "Expected '(' after 'returns'.")?;
+            let r = self.parse_decl_name_token()?;
+            // optional type annotation `:type`
+            if self.check_type(TokenType::Op) && self.current().value == ":" {
+                self.advance();
+                if self.check_type(TokenType::Ident) || self.check_type(TokenType::Keyword) {
+                    self.advance();
+                }
+            }
+            self.consume_type(TokenType::RParen, "Expected ')' after returns.")?;
+            return_name = Some(r);
+        }
+
+        self.skip_newlines();
+        let body = self.parse_statement_block(&["end"], false)?;
+        self.consume_keyword("end", "Expected 'end' to close reporter definition.")?;
+
+        Ok(ReporterDecl {
+            pos,
+            name,
+            params,
+            return_name,
             body,
         })
     }

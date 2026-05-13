@@ -452,6 +452,7 @@ fn keyword_set() -> HashSet<&'static str> {
         "down",
         "done",
         "define",
+        "reporter",
         "delete",
         "direction",
         "edge",

@@ -1,0 +1,12 @@
+sprite ReporterSplitTest
+  list out
+  var i
+
+  reporter split (text) by (sep) returns (out)
+  end
+
+  define noop
+    # no-op script
+    set [i] to (0)
+  end
+end

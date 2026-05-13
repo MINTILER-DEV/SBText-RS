@@ -554,10 +554,20 @@ pub struct Target {
     pub costumes: Vec<CostumeDecl>,
     pub procedures: Vec<Procedure>,
     pub scripts: Vec<EventScript>,
+    pub reporters: Vec<ReporterDecl>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Project {
     pub pos: Position,
     pub targets: Vec<Target>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReporterDecl {
+    pub pos: Position,
+    pub name: String,
+    pub params: Vec<String>,
+    pub return_name: Option<String>,
+    pub body: Vec<Statement>,
 }

@@ -1,6 +1,6 @@
 use crate::ast::{
-    EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure, Project, Statement,
-    Target, VariableDecl,
+    EventScript, EventType, Expr, InitialValue, ListDecl, Position, Procedure, Project, ReporterDecl,
+    Statement, Target, VariableDecl,
 };
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Map, Value};
@@ -294,7 +294,7 @@ fn report_progress(
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 struct ProcedureSignature {
     params: Vec<String>,
     arg_ids: Vec<String>,
@@ -329,6 +329,8 @@ struct ProjectBuilder<'a> {
     global_var_names: HashMap<String, String>,
     global_list_ids: HashMap<String, String>,
     global_list_names: HashMap<String, String>,
+    current_reporters: HashMap<String, ReporterDecl>,
+    current_signatures: HashMap<String, ProcedureSignature>,
 }
 
 impl<'a> ProjectBuilder<'a> {
@@ -345,6 +347,8 @@ impl<'a> ProjectBuilder<'a> {
             global_var_names: HashMap::new(),
             global_list_ids: HashMap::new(),
             global_list_names: HashMap::new(),
+            current_reporters: HashMap::new(),
+            current_signatures: HashMap::new(),
         }
     }
 
@@ -420,6 +424,7 @@ impl<'a> ProjectBuilder<'a> {
             costumes: Vec::new(),
             procedures: Vec::<Procedure>::new(),
             scripts: Vec::<EventScript>::new(),
+            reporters: Vec::<crate::ast::ReporterDecl>::new(),
         }
     }
 
@@ -484,6 +489,26 @@ impl<'a> ProjectBuilder<'a> {
             lists_json.insert(list_id, json!([list_decl.name, initial]));
         }
 
+        // Inject generated lists for reporters (output lists)
+        for reporter in &target.reporters {
+            if let Some(rname) = &reporter.return_name {
+                let key = rname.to_lowercase();
+                if lists_map.contains_key(&key) {
+                    continue;
+                }
+                let list_id = if target.is_stage {
+                    self.global_list_ids
+                        .get(&key)
+                        .cloned()
+                        .unwrap_or_else(|| self.new_id("list"))
+                } else {
+                    self.new_id("list")
+                };
+                lists_map.insert(key, list_id.clone());
+                lists_json.insert(list_id, json!([rname, json!([])]));
+            }
+        }
+
         let mut variables_map = local_variables_map.clone();
         for (k, v) in &self.global_var_ids {
             variables_map.insert(k.clone(), v.clone());
@@ -493,11 +518,38 @@ impl<'a> ProjectBuilder<'a> {
         }
 
         let signatures = self.build_procedure_signatures(target);
+        // expose current target reporters and signatures for expression emission
+        self.current_reporters.clear();
+        for r in &target.reporters {
+            self.current_reporters
+                .insert(r.name.to_lowercase(), r.clone());
+        }
+        self.current_signatures = signatures.clone();
         let mut y_cursor: i32 = 30;
         for procedure in &target.procedures {
             y_cursor = self.emit_procedure_definition(
                 &mut blocks,
                 procedure,
+                &signatures,
+                &variables_map,
+                &lists_map,
+                y_cursor,
+            )?;
+            y_cursor += 40;
+        }
+        // Emit synthesized procedures for reporters
+        for reporter in &target.reporters {
+            let proc_name = format!("__reporter__{}", reporter.name);
+            let synth_proc = Procedure {
+                pos: reporter.pos,
+                name: proc_name.clone(),
+                params: reporter.params.clone(),
+                run_without_screen_refresh: false,
+                body: reporter.body.clone(),
+            };
+            y_cursor = self.emit_procedure_definition(
+                &mut blocks,
+                &synth_proc,
                 &signatures,
                 &variables_map,
                 &lists_map,
@@ -606,6 +658,29 @@ impl<'a> ProjectBuilder<'a> {
                     arg_ids,
                     proccode,
                     warp: procedure.run_without_screen_refresh,
+                },
+            );
+        }
+        // Include reporter declarations as callable procedures (synthesized)
+        for reporter in &target.reporters {
+            let arg_ids = reporter
+                .params
+                .iter()
+                .map(|_| self.new_id("arg"))
+                .collect::<Vec<_>>();
+            let placeholders = reporter.params.iter().map(|_| "%s").collect::<Vec<_>>().join(" ");
+            let proccode = if placeholders.is_empty() {
+                reporter.name.clone()
+            } else {
+                format!("{} {}", reporter.name, placeholders)
+            };
+            signatures.insert(
+                format!("__reporter__{}", reporter.name).to_lowercase(),
+                ProcedureSignature {
+                    params: reporter.params.clone(),
+                    arg_ids,
+                    proccode,
+                    warp: false,
                 },
             );
         }
@@ -3656,40 +3731,102 @@ impl<'a> ProjectBuilder<'a> {
                 Ok(Some(block_id))
             }
             Expr::StringSplit { text, sep, .. } => {
-                let block_id = self.new_block_id();
-                blocks.insert(
-                    block_id.clone(),
-                    json!({
-                        "opcode": "operator_split",
-                        "next": Value::Null,
-                        "parent": parent_id,
-                        "inputs": {},
-                        "fields": {},
-                        "shadow": false,
-                        "topLevel": false
-                    }),
-                );
-                let text_input = self.expr_input(
-                    blocks,
-                    text,
-                    &block_id,
-                    variables_map,
-                    lists_map,
-                    param_scope,
-                    "string",
-                )?;
-                let sep_input = self.expr_input(
-                    blocks,
-                    sep,
-                    &block_id,
-                    variables_map,
-                    lists_map,
-                    param_scope,
-                    "string",
-                )?;
-                set_block_input(blocks, &block_id, "STRING", text_input)?;
-                set_block_input(blocks, &block_id, "SEP", sep_input)?;
-                Ok(Some(block_id))
+                // If a reporter named "split" is declared on this target,
+                // emit a call to the synthesized reporter procedure instead
+                if self.current_reporters.contains_key("split") {
+                    let sig_key = format!("__reporter__{}", "split").to_lowercase();
+                    let sig_opt = self.current_signatures.get(&sig_key).cloned();
+                    let block_id = self.new_block_id();
+                    let mut inputs = Map::new();
+                    let text_input = self.expr_input(
+                        blocks,
+                        text,
+                        &block_id,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                        "string",
+                    )?;
+                    let sep_input = self.expr_input(
+                        blocks,
+                        sep,
+                        &block_id,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                        "string",
+                    )?;
+                    // map args to signature arg ids when available
+                    if let Some(s) = sig_opt.as_ref() {
+                        if s.arg_ids.len() >= 1 {
+                            inputs.insert(s.arg_ids[0].clone(), text_input);
+                        }
+                        if s.arg_ids.len() >= 2 {
+                            inputs.insert(s.arg_ids[1].clone(), sep_input);
+                        }
+                    } else {
+                        // fallback to positional ids
+                        inputs.insert("ARG1".to_string(), text_input);
+                        inputs.insert("ARG2".to_string(), sep_input);
+                    }
+                    let proccode_val = sig_opt.as_ref().map(|s| s.proccode.clone()).unwrap_or("split".to_string());
+                    let argids_json = serde_json::to_string(&sig_opt.as_ref().map(|s| s.arg_ids.clone()).unwrap_or_default()).unwrap_or("[]".to_string());
+                    blocks.insert(
+                        block_id.clone(),
+                        json!({
+                            "opcode": "procedures_call",
+                            "next": Value::Null,
+                            "parent": parent_id,
+                            "inputs": inputs,
+                            "fields": {},
+                            "shadow": false,
+                            "topLevel": false,
+                            "mutation": {
+                                "tagName": "mutation",
+                                "children": [],
+                                "proccode": proccode_val,
+                                "argumentids": argids_json,
+                                "warp": "false"
+                            }
+                        }),
+                    );
+                    Ok(Some(block_id))
+                } else {
+                    let block_id = self.new_block_id();
+                    blocks.insert(
+                        block_id.clone(),
+                        json!({
+                            "opcode": "operator_split",
+                            "next": Value::Null,
+                            "parent": parent_id,
+                            "inputs": {},
+                            "fields": {},
+                            "shadow": false,
+                            "topLevel": false
+                        }),
+                    );
+                    let text_input = self.expr_input(
+                        blocks,
+                        text,
+                        &block_id,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                        "string",
+                    )?;
+                    let sep_input = self.expr_input(
+                        blocks,
+                        sep,
+                        &block_id,
+                        variables_map,
+                        lists_map,
+                        param_scope,
+                        "string",
+                    )?;
+                    set_block_input(blocks, &block_id, "STRING", text_input)?;
+                    set_block_input(blocks, &block_id, "SEP", sep_input)?;
+                    Ok(Some(block_id))
+                }
             }
             Expr::Substring { text, start, end, .. } => {
                 let block_id = self.new_block_id();

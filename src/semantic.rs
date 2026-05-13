@@ -38,6 +38,13 @@ struct ProcedureInfo {
 }
 
 #[derive(Debug, Clone)]
+struct ReporterInfo {
+    line: usize,
+    params: Vec<String>,
+    return_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 struct TargetInfo {
     name: String,
     variables: HashSet<String>,
@@ -192,6 +199,87 @@ fn analyze_target(
             options,
             warnings,
         )?;
+    }
+
+    // Analyze reporter declarations
+    let mut reporters: HashMap<String, ReporterInfo> = HashMap::new();
+    for reporter in &target.reporters {
+        let lowered = reporter.name.to_lowercase();
+        if let Some(prev) = reporters.get(&lowered) {
+            return Err(SemanticError {
+                message: format!(
+                    "Reporter '{}' is already defined at line {} in target '{}'.",
+                    reporter.name, prev.line, target.name
+                ),
+            });
+        }
+        if procedures.contains_key(&lowered) {
+            return Err(SemanticError {
+                message: format!(
+                    "Reporter '{}' conflicts with a procedure name in target '{}'.",
+                    reporter.name, target.name
+                ),
+            });
+        }
+        let mut param_names = HashSet::new();
+        for p in &reporter.params {
+            if !param_names.insert(p.to_lowercase()) {
+                return Err(SemanticError {
+                    message: format!(
+                        "Reporter '{}' has duplicate parameter names at line {}, column {}.",
+                        reporter.name, reporter.pos.line, reporter.pos.column
+                    ),
+                });
+            }
+        }
+        reporters.insert(
+            lowered,
+            ReporterInfo {
+                line: reporter.pos.line,
+                params: reporter.params.clone(),
+                return_name: reporter.return_name.clone(),
+            },
+        );
+    }
+
+    // Validate reporter bodies
+    for reporter in &target.reporters {
+        let param_scope = reporter
+            .params
+            .iter()
+            .map(|p| p.to_lowercase())
+            .collect::<HashSet<_>>();
+
+        // augmented variables map: allow the declared return name as a local variable
+        let mut augmented_vars = variables.clone();
+        if let Some(rn) = &reporter.return_name {
+            augmented_vars.insert(rn.to_lowercase(), reporter.pos.line);
+        }
+
+        analyze_statements(
+            target,
+            &reporter.body,
+            &augmented_vars,
+            &lists,
+            &procedures,
+            target_infos,
+            &param_scope,
+            &format!("reporter '{}'", reporter.name),
+            options,
+            warnings,
+        )?;
+
+        if let Some(rn) = &reporter.return_name {
+            let rn_lower = rn.to_lowercase();
+            if !reporter_assigns_return(&reporter.body, &rn_lower) {
+                return Err(SemanticError {
+                    message: format!(
+                        "Reporter '{}' must assign its return variable '{}' at line {}, column {} in target '{}'.",
+                        reporter.name, rn, reporter.pos.line, reporter.pos.column, target.name
+                    ),
+                });
+            }
+        }
     }
 
     Ok(())
@@ -918,4 +1006,43 @@ fn is_sensing_property_name(name: &str) -> bool {
             | "backdrop #"
             | "backdrop name"
     )
+}
+
+fn reporter_assigns_return(statements: &[Statement], return_name: &str) -> bool {
+    for stmt in statements {
+        match stmt {
+            Statement::SetVar { var_name, .. } if var_name.eq_ignore_ascii_case(return_name) => {
+                return true;
+            }
+            Statement::AddToList { list_name, .. }
+            | Statement::DeleteAllOfList { list_name, .. }
+            | Statement::InsertAtList { list_name, .. }
+            | Statement::ReplaceItemOfList { list_name, .. }
+            | Statement::DeleteOfList { list_name, .. } if list_name.eq_ignore_ascii_case(return_name) => {
+                return true;
+            }
+            Statement::Repeat { body, .. }
+            | Statement::RepeatUntil { body, .. }
+            | Statement::Forever { body, .. }
+            | Statement::ForEach { body, .. }
+            | Statement::While { body, .. } => {
+                if reporter_assigns_return(body, return_name) {
+                    return true;
+                }
+            }
+            Statement::If {
+                then_body,
+                else_body,
+                ..
+            } => {
+                if reporter_assigns_return(then_body, return_name)
+                    || reporter_assigns_return(else_body, return_name)
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+    }
+    false
 }
