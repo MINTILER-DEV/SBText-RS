@@ -1,0 +1,15 @@
+{
+  "name": "sbtext-rs",
+  "type": "module",
+  "version": "1.4.0",
+  "files": [
+    "sbtext_rs_core_bg.wasm",
+    "sbtext_rs_core.js",
+    "sbtext_rs_core.d.ts"
+  ],
+  "main": "sbtext_rs_core.js",
+  "types": "sbtext_rs_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
