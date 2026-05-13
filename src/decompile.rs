@@ -1,9 +1,9 @@
+use crate::sb3::read_sb3_file;
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use zip::ZipArchive;
 
 type ProgressCallback<'a> = dyn FnMut(usize, usize, &str) + 'a;
 
@@ -28,7 +28,9 @@ where
     let mut progress = progress.map(|cb| cb as &mut ProgressCallback<'_>);
 
     report_progress(&mut progress, 1, 1, "Reading .sb3 archive");
-    let (project_json, assets) = read_sb3(input)?;
+    let archive = read_sb3_file(input)?;
+    let project_json = archive.project;
+    let assets = archive.assets.into_iter().collect::<HashMap<_, _>>();
     let targets = project_json
         .get("targets")
         .and_then(Value::as_array)
@@ -81,39 +83,6 @@ fn report_progress(
     if let Some(cb) = progress.as_deref_mut() {
         cb(step, total, label);
     }
-}
-
-fn read_sb3(input: &Path) -> Result<(Value, HashMap<String, Vec<u8>>)> {
-    let file =
-        fs::File::open(input).with_context(|| format!("Failed to open '{}'.", input.display()))?;
-    let mut zip = ZipArchive::new(file)
-        .with_context(|| format!("'{}' is not a valid zip/.sb3 file.", input.display()))?;
-
-    let mut project_json_str = String::new();
-    {
-        let mut entry = zip
-            .by_name("project.json")
-            .map_err(|_| anyhow!("project.json not found in '{}'.", input.display()))?;
-        use std::io::Read;
-        entry.read_to_string(&mut project_json_str)?;
-    }
-    let project_json: Value = serde_json::from_str(&project_json_str)
-        .with_context(|| format!("Invalid project.json inside '{}'.", input.display()))?;
-
-    let mut assets = HashMap::new();
-    for i in 0..zip.len() {
-        let mut entry = zip.by_index(i)?;
-        let name = entry.name().to_string();
-        if name == "project.json" || name.ends_with('/') {
-            continue;
-        }
-        let mut bytes = Vec::new();
-        use std::io::Read;
-        entry.read_to_end(&mut bytes)?;
-        assets.insert(name, bytes);
-    }
-
-    Ok((project_json, assets))
 }
 
 #[derive(Debug, Clone)]

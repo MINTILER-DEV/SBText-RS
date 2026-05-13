@@ -44,6 +44,9 @@ sbtext-rs INPUT OUTPUT.sprite3
 sbtext-rs INPUT OUTPUT.sprite3 --sprite-name Player
 sbtext-rs INPUT.sb3 --decompile
 sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
+sbtext-rs inspect INPUT.sb3
+sbtext-rs obfuscate INPUT.sb3 -o OUTPUT.sb3 --level high
+sbtext-rs obfuscate INPUT.sb3 -o OUTPUT.sb3 --preset clicker
 ```
 
 ## Native + Library
@@ -87,3 +90,46 @@ sbtext-rs INPUT.sb3 OUT_DIR --decompile --split-sprites
   - `main.sbtext` contains the stage block and `import` lines.
   - each sprite is written as its own `.sbtext` file.
   - costume assets referenced by `md5ext` are extracted beside the output files.
+
+## SB3 Obfuscation
+
+SBText-RS can inspect and obfuscate existing Scratch `.sb3` projects.
+
+Inspect a project:
+
+```bash
+sbtext-rs inspect game.sb3
+```
+
+Obfuscate an existing project:
+
+```bash
+sbtext-rs obfuscate game.sb3 -o game.obf.sb3 --level high
+```
+
+For clicker games:
+
+```bash
+sbtext-rs obfuscate game.sb3 -o game.obf.sb3 --preset clicker
+```
+
+Useful options:
+
+```bash
+sbtext-rs obfuscate game.sb3 -o game.obf.sb3 --rename --ids --layout --junk
+sbtext-rs obfuscate game.sb3 -o game.obf.sb3 --wrap-procedures --flatten
+sbtext-rs obfuscate game.sb3 -o game.obf.sb3 --protect coins,"coins per click",rebirths
+sbtext-rs obfuscate game.sb3 -o game.obf.sb3 --seed 12345
+```
+
+What it does today:
+
+- renames variables, lists, broadcasts, and custom procedure proccodes
+- can wrap custom procedure calls in generated forwarding procedures
+- can flatten control flow by extracting chains and substacks into generated helper procedures
+- randomizes block IDs while rewriting references safely
+- scrambles top-level script layout
+- injects bait variables
+- supports an MVP clicker protection mode that renames the real variable, adds a fake visible variable, and writes checksum metadata for later stronger protection
+
+This is not real security. Scratch projects are always inspectable. The goal is to discourage casual tampering, not stop determined reverse engineering.

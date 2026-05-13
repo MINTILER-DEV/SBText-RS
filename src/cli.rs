@@ -1,14 +1,32 @@
-use clap::Parser;
+use crate::obfuscator::config::{ObfuscationLevel, ObfuscationPreset};
+use clap::{Args as ClapArgs, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "sbtext-rs",
-    about = "Rust SBText compiler (native backend by default, optional Python parity backend)."
+    about = "Rust SBText compiler with SB3 decompile, inspect, and obfuscation support.",
+    subcommand_negates_reqs = true,
+    subcommand_precedence_over_arg = true
 )]
 pub struct Args {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
+    #[command(flatten)]
+    pub compile: CompileArgs,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    Obfuscate(ObfuscateArgs),
+    Inspect(InspectArgs),
+}
+
+#[derive(ClapArgs, Debug, Default)]
+pub struct CompileArgs {
     #[arg(value_name = "INPUT")]
-    pub input: PathBuf,
+    pub input: Option<PathBuf>,
 
     #[arg(value_name = "OUTPUT")]
     pub output: Option<PathBuf>,
@@ -61,4 +79,59 @@ pub struct Args {
         help = "Allow unresolved procedure calls. Unknown procedure calls compile as no-op wait(0) blocks."
     )]
     pub allow_unknown_procedures: bool,
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+pub struct ObfuscateArgs {
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
+
+    #[arg(short, long, value_name = "OUTPUT")]
+    pub output: PathBuf,
+
+    #[arg(long, value_enum, default_value_t = ObfuscationLevel::Medium)]
+    pub level: ObfuscationLevel,
+
+    #[arg(long, help = "Rename variables, lists, broadcasts, and procedures.")]
+    pub rename: bool,
+
+    #[arg(
+        long,
+        help = "Wrap custom procedure definitions in generated forwarding procedures."
+    )]
+    pub wrap_procedures: bool,
+
+    #[arg(
+        long,
+        help = "Flatten control flow by extracting chains and substacks into generated helper procedures."
+    )]
+    pub flatten: bool,
+
+    #[arg(long = "ids", help = "Randomize Scratch block IDs.")]
+    pub ids: bool,
+
+    #[arg(long, help = "Scramble top-level script layout coordinates.")]
+    pub layout: bool,
+
+    #[arg(long, help = "Inject bait variables.")]
+    pub junk: bool,
+
+    #[arg(
+        long,
+        value_name = "NAMES",
+        help = "Comma-separated variable names to protect."
+    )]
+    pub protect: Option<String>,
+
+    #[arg(long, value_enum)]
+    pub preset: Option<ObfuscationPreset>,
+
+    #[arg(long, value_name = "SEED")]
+    pub seed: Option<u64>,
+}
+
+#[derive(ClapArgs, Debug, Clone)]
+pub struct InspectArgs {
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
 }

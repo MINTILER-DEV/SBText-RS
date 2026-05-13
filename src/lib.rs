@@ -2,7 +2,9 @@ pub mod ast;
 pub mod codegen;
 pub mod imports;
 pub mod lexer;
+pub mod obfuscator;
 pub mod parser;
+pub mod sb3;
 pub mod sbtc;
 pub mod semantic;
 
@@ -16,6 +18,8 @@ pub mod python_backend;
 pub mod decompile;
 
 use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
+use cli::{Command, CompileArgs, InspectArgs, ObfuscateArgs};
 use codegen::CodegenOptions;
 use imports::{resolve_merged_source_with_map, MergedSource};
 use lexer::{Lexer, TokenType};
@@ -33,6 +37,23 @@ pub mod wasm;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_cli(args: &cli::Args) -> Result<()> {
+    if let Some(command) = &args.command {
+        return match command {
+            Command::Obfuscate(command_args) => run_obfuscate_cli(command_args),
+            Command::Inspect(command_args) => run_inspect_cli(command_args),
+        };
+    }
+
+    run_compile_cli(&args.compile)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_compile_cli(args: &CompileArgs) -> Result<()> {
+    let input_arg = args.input.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Missing INPUT. Use 'sbtext-rs <INPUT> [OUTPUT]' for compile/decompile, or 'sbtext-rs inspect <INPUT.sb3>' / 'sbtext-rs obfuscate <INPUT.sb3> -o <OUTPUT.sb3>'."
+        )
+    })?;
     if args.decompile {
         if args.python_backend {
             anyhow::bail!("--python-backend cannot be used with --decompile.");
@@ -54,7 +75,7 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
         }
         let mut progress = CliProgress::new("Decompile");
         progress.emit("Resolving input path", 1, 1);
-        let input = canonicalize_file(&args.input)?;
+        let input = canonicalize_file(input_arg)?;
         let result = {
             let mut decomp_stage_cb = |step: usize, total: usize, label: &str| {
                 progress.emit(label, step, total);
@@ -88,7 +109,7 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
 
     let mut progress = CliProgress::new("Compile");
     progress.emit("Resolving input path", 1, 1);
-    let input = canonicalize_file(&args.input)?;
+    let input = canonicalize_file(input_arg)?;
     let input_is_sbtc = args.compile_sbtc || is_sbtc_path(&input);
 
     if args.python_backend && input_is_sbtc {
@@ -192,6 +213,60 @@ pub fn run_cli(args: &cli::Args) -> Result<()> {
 
     progress.emit("Compile complete", 1, 1);
     progress.finish();
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_inspect_cli(args: &InspectArgs) -> Result<()> {
+    let input = canonicalize_file(&args.input)?;
+    let report = obfuscator::inspect_sb3_file(&input)?;
+    println!(
+        "{}",
+        obfuscator::inspect::render_inspect_report(&pretty_path(&input), &report)
+    );
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn run_obfuscate_cli(args: &ObfuscateArgs) -> Result<()> {
+    let input = canonicalize_file(&args.input)?;
+    let protect_vars = args
+        .protect
+        .as_deref()
+        .map(obfuscator::parse_protect_list)
+        .unwrap_or_default();
+    let config = obfuscator::config::ObfuscationConfig {
+        level: args.level,
+        rename: args.rename,
+        wrap_procedures: args.wrap_procedures,
+        flatten_control_flow: args.flatten,
+        randomize_ids: args.ids,
+        scramble_layout: args.layout,
+        inject_junk: args.junk,
+        protect_vars,
+        preset: args.preset,
+        seed: args.seed,
+    };
+    let result = obfuscator::obfuscate_sb3_file(&input, &args.output, config)?;
+
+    println!("SBText-RS Obfuscator");
+    println!("Input: {}", pretty_path(&input));
+    println!("Output: {}", args.output.display());
+    println!("Seed: {}", result.seed);
+    println!();
+    println!("Passes:");
+    if result.applied_passes.is_empty() {
+        println!("[ok] no obfuscation passes selected");
+    } else {
+        for pass in &result.applied_passes {
+            println!("[ok] {}", pass);
+        }
+    }
+    for warning in &result.warnings {
+        println!("[warn] {}", warning);
+    }
+    println!();
+    println!("Done.");
     Ok(())
 }
 
