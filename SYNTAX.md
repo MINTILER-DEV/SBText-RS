@@ -79,7 +79,7 @@ Import line notes:
 
 ### 4.4 Reserved keywords
 
-`add all and answer ask at backdrop bounce broadcast by change clicked contains contents costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left length list mouse move next not object of on or pick point pressed random receive repeat replace reset right round say seconds set show size sprite stage steps stop switch then think this timer to touching turn until var wait when while with x y`
+`add all and answer ask at backdrop bounce broadcast by change clicked contains contents costume define delete direction each edge else end flag floor for forever go hide i if in insert item key left [...]`
 
 ## 5) File and target structure
 
@@ -342,6 +342,34 @@ round (expr)
 ```
 
 `key (expr) pressed` (without `?`) is also accepted.
+
+Supported math functions:
+
+```sbtext
+abs (expr)
+floor (expr)
+ceiling (expr)
+sqrt (expr)
+sin (expr)
+cos (expr)
+tan (expr)
+asin (expr)
+acos (expr)
+atan (expr)
+ln (expr)
+log (expr)
+e ^ (expr)
+10 ^ (expr)
+round (expr)
+```
+
+These functions are parsed as math reporters and require one parenthesized expression. For example:
+
+```sbtext
+set [root] to (sqrt (16))
+set [angle] to (sin (90))
+set [rounded] to (round (3.14))
+```
 
 ### 9.3 Unary/binary operators
 
