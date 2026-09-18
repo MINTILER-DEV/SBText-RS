@@ -324,6 +324,7 @@ Rules:
 pick random (a) to (b)
 item (index) of [list]
 length of [list]
+length of (expr)
 contents of [list]
 [list] contains (expr)
 join (text1) with (text2)

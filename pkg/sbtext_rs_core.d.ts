@@ -9,6 +9,8 @@ export function compile_source_to_sb3(source: string): Uint8Array;
 
 export function compile_source_to_sb3_with_options(source: string, source_dir: string, scale_svgs: boolean): Uint8Array;
 
+export function obfuscate_sb3_with_options(sb3_bytes: Uint8Array, level: string, rename: boolean, wrap_procedures: boolean, flatten_control_flow: boolean, randomize_ids: boolean, scramble_layout: boolean, inject_junk: boolean, protect_csv: string, preset: string, seed: string): Uint8Array;
+
 export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembly.Module;
 
 export interface InitOutput {
@@ -17,6 +19,9 @@ export interface InitOutput {
     readonly compile_sbtc_to_sb3_with_options: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
     readonly compile_source_to_sb3: (a: number, b: number) => [number, number, number, number];
     readonly compile_source_to_sb3_with_options: (a: number, b: number, c: number, d: number, e: number) => [number, number, number, number];
+    readonly obfuscate_sb3_with_options: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number, m: number, n: number, o: number, p: number) => [number, number, number, number];
+    readonly __wbindgen_exn_store: (a: number) => void;
+    readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __externref_table_dealloc: (a: number) => void;

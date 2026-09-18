@@ -40,6 +40,10 @@ pub enum Expr {
         pos: Position,
         list_name: String,
     },
+    StringLength {
+        pos: Position,
+        text: Box<Expr>,
+    },
     ListContains {
         pos: Position,
         list_name: String,
@@ -108,6 +112,7 @@ impl Expr {
             | Expr::PickRandom { pos, .. }
             | Expr::ListItem { pos, .. }
             | Expr::ListLength { pos, .. }
+            | Expr::StringLength { pos, .. }
             | Expr::ListContains { pos, .. }
             | Expr::ListContents { pos, .. }
             | Expr::KeyPressed { pos, .. }

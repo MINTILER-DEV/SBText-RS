@@ -3536,6 +3536,32 @@ impl<'a> ProjectBuilder<'a> {
                 set_block_input(blocks, &block_id, "INDEX", index_input)?;
                 Ok(Some(block_id))
             }
+            Expr::StringLength { text, .. } => {
+                let block_id = self.new_block_id();
+                blocks.insert(
+                    block_id.clone(),
+                    json!({
+                        "opcode": "operator_length",
+                        "next": Value::Null,
+                        "parent": parent_id,
+                        "inputs": {},
+                        "fields": {},
+                        "shadow": false,
+                        "topLevel": false
+                    }),
+                );
+                let text_input = self.expr_input(
+                    blocks,
+                    text,
+                    &block_id,
+                    variables_map,
+                    lists_map,
+                    param_scope,
+                    "string",
+                )?;
+                set_block_input(blocks, &block_id, "STRING", text_input)?;
+                Ok(Some(block_id))
+            }
             Expr::ListLength { list_name, .. } => {
                 let list_id = self.lookup_list_id(lists_map, list_name)?;
                 let block_id = self.new_block_id();

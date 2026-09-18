@@ -877,6 +877,9 @@ fn analyze_expr(
         Expr::ListLength { list_name, pos } => {
             ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)
         }
+        Expr::StringLength { text, .. } => {
+            analyze_expr(target, text, variables, lists, target_infos, param_scope)
+        }
         Expr::ListContents { list_name, pos } => {
             ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)
         }

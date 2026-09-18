@@ -24,7 +24,7 @@ use self::pass::ObfuscationPass;
 use self::protect::ProtectVariablesPass;
 use self::rename::RenamePass;
 use self::wrap::WrapProceduresPass;
-use crate::sb3::{read_sb3_file, write_sb3_file};
+use crate::sb3::{build_sb3_bytes, read_sb3_bytes, read_sb3_file, write_sb3_file};
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -46,6 +46,16 @@ pub fn obfuscate_sb3_file(
     let result = obfuscate_project(&mut archive.project, &config)?;
     write_sb3_file(output, &archive)?;
     Ok(result)
+}
+
+pub fn obfuscate_sb3_bytes(
+    input: &[u8],
+    config: ObfuscationConfig,
+) -> Result<(Vec<u8>, ObfuscationRunResult)> {
+    let mut archive = read_sb3_bytes(input)?;
+    let result = obfuscate_project(&mut archive.project, &config)?;
+    let bytes = build_sb3_bytes(&archive)?;
+    Ok((bytes, result))
 }
 
 pub fn obfuscate_project(
@@ -487,6 +497,38 @@ mod tests {
             Some(&b"beta".to_vec())
         );
         assert_eq!(roundtrip.project["targets"][0]["name"], "Stage");
+    }
+
+    #[test]
+    fn obfuscates_sb3_bytes_and_preserves_assets() {
+        let archive = Sb3Archive::new(
+            sample_project(),
+            BTreeMap::from([("sound.wav".to_string(), b"beep".to_vec())]),
+        );
+        let bytes = build_sb3_bytes(&archive).expect("build bytes");
+        let (obfuscated_bytes, result) = obfuscate_sb3_bytes(
+            &bytes,
+            ObfuscationConfig {
+                level: ObfuscationLevel::Low,
+                rename: true,
+                wrap_procedures: false,
+                flatten_control_flow: false,
+                randomize_ids: false,
+                scramble_layout: false,
+                inject_junk: false,
+                protect_vars: Vec::new(),
+                preset: None,
+                seed: Some(123),
+            },
+        )
+        .expect("obfuscate bytes");
+        let roundtrip = read_sb3_bytes(&obfuscated_bytes).expect("read obfuscated bytes");
+        assert_eq!(
+            roundtrip.assets.get("sound.wav"),
+            Some(&b"beep".to_vec())
+        );
+        assert!(!result.applied_passes.is_empty());
+        assert_ne!(roundtrip.project["targets"][0]["variables"]["var1"][0], "coins");
     }
 
     #[test]

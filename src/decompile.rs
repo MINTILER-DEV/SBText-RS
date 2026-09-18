@@ -879,6 +879,9 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             format!("length of [{}]", format_bracket_name(&list))
         }
+        "operator_length" => {
+            format!("length of ({})", expr_from_input(blocks, block, "STRING")?)
+        }
         "data_listcontents" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             format!("contents of [{}]", format_bracket_name(&list))

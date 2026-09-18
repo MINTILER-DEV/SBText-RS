@@ -1546,7 +1546,16 @@ impl Parser {
                 list_name,
             });
         }
-        self.error_here("Expected list reference after 'length of'.")
+        if self.check_type(TokenType::LParen) {
+            let text = self.parse_wrapped_expression()?;
+            return Ok(Expr::StringLength {
+                pos: start,
+                text: Box::new(text),
+            });
+        }
+        self.error_here(
+            "Expected list reference [name] or string expression (expr) after 'length of'.",
+        )
     }
 
     fn parse_contents_expr(&mut self) -> Result<Expr, ParseError> {
