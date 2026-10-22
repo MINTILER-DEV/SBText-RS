@@ -98,6 +98,14 @@ Target members:
 - `list <name>`
 - `list <name> = [item1, item2, ...]`
 - `costume "relative/or/absolute/path.svg|.png"`
+- `costume "path.svg" as "Scratch costume name"`
+- `sound "path.wav|.mp3" as "Scratch sound name"`
+
+Asset declarations may end with `metadata "{\"rotationCenterX\":240,\"rotationCenterY\":180}"` (or sound metadata such as rate/sampleCount). Metadata marks imported assets whose original bytes and SVG dimensions must be preserved. A target-level `properties "{\"x\":20,\"visible\":false,\"currentCostume\":1}"` declaration preserves saved target settings; costume indices here are zero-based Scratch JSON indices. Explicit asset names remain unchanged, including whitespace. Without `as`, the filename stem supplies the name.
+
+Additional built-in expressions: `x position`, `y position`, `direction`, `size`, `volume`, `mouse down?`, `username`, `loudness`, `days since 2000`, `costume number`, `costume name`, `backdrop number`, `backdrop name`, `distance to (target)`, `index of (item) in [list]`, `letter (index) of (text)`, and `(text) contains (text)`. Brackets select variables that share a built-in name, for example `[volume]`.
+
+Clone event scripts use `when I start as a clone`.
 - `define ... end`
 - `when ...` scripts
 

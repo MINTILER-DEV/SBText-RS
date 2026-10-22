@@ -90,6 +90,8 @@ impl Parser {
             variables: Vec::new(),
             lists: Vec::new(),
             costumes: Vec::new(),
+            sounds: Vec::new(),
+            properties: serde_json::Map::new(),
             procedures: Vec::new(),
             scripts: Vec::new(),
             reporters: Vec::new(),
@@ -141,12 +143,17 @@ impl Parser {
             }
             if self.match_keyword("costume") {
                 let prev = self.previous().pos;
-                let path_token =
-                    self.consume_type(TokenType::String, "Expected costume path string.")?;
-                target.costumes.push(CostumeDecl {
-                    pos: prev,
-                    path: path_token.value,
-                });
+                target.costumes.push(self.parse_asset_decl(prev)?);
+                continue;
+            }
+            if self.match_keyword("sound") {
+                let prev = self.previous().pos;
+                target.sounds.push(self.parse_asset_decl(prev)?);
+                continue;
+            }
+            if self.word_at_offset(0).as_deref() == Some("properties") {
+                self.advance();
+                target.properties = self.parse_json_object("target properties")?;
                 continue;
             }
             if self.match_keyword("define") {
@@ -165,10 +172,35 @@ impl Parser {
                 continue;
             }
             return self.error_here(
-                "Expected 'var', 'list', 'costume', 'define', 'when', or 'end' inside target.",
+                "Expected 'var', 'list', 'costume', 'sound', 'properties', 'define', 'when', or 'end' inside target.",
             );
         }
         Ok(target)
+    }
+
+    fn parse_json_object(&mut self, label: &str) -> Result<serde_json::Map<String, serde_json::Value>, ParseError> {
+        let token = self.consume_type(TokenType::String, "Expected a quoted JSON object.")?;
+        let value: serde_json::Value = serde_json::from_str(&token.value).map_err(|e| ParseError {
+            message: format!("Invalid {} JSON: {}", label, e),
+            pos: token.pos,
+        })?;
+        value.as_object().cloned().ok_or_else(|| ParseError {
+            message: format!("{} must be a JSON object.", label),
+            pos: token.pos,
+        })
+    }
+
+    fn parse_asset_decl(&mut self, pos: Position) -> Result<CostumeDecl, ParseError> {
+        let path = self.consume_type(TokenType::String, "Expected asset path string.")?.value;
+        let name = if self.word_at_offset(0).as_deref() == Some("as") {
+            self.advance();
+            Some(self.consume_type(TokenType::String, "Expected asset name string after 'as'.")?.value)
+        } else { None };
+        let metadata = if self.word_at_offset(0).as_deref() == Some("metadata") {
+            self.advance();
+            Some(self.parse_json_object("asset metadata")?)
+        } else { None };
+        Ok(CostumeDecl { pos, path, name, metadata })
     }
 
     fn parse_procedure(&mut self, pos: Position) -> Result<Procedure, ParseError> {
@@ -278,12 +310,22 @@ impl Parser {
             )?;
             EventType::WhenThisSpriteClicked
         } else if self.match_keyword("i") {
+            if self.match_keyword("start") {
+                if self.word_at_offset(0).as_deref() != Some("as") {
+                    return self.error_here("Expected 'as' in 'when I start as a clone'.");
+                }
+                self.advance();
+                if self.word_at_offset(0).as_deref() == Some("a") { self.advance(); }
+                self.consume_keyword("clone", "Expected 'clone' in 'when I start as a clone'.")?;
+                EventType::WhenIStartAsClone
+            } else {
             self.consume_keyword("receive", "Expected 'receive' after 'when I'.")?;
             let msg = self.parse_bracket_text()?;
             if msg.is_empty() {
                 return self.error_here("Broadcast message cannot be empty.");
             }
             EventType::WhenIReceive(msg)
+            }
         } else if self.check_type(TokenType::LBracket) {
             let key_name = self.parse_bracket_text()?;
             if key_name.is_empty() {
@@ -302,7 +344,7 @@ impl Parser {
         };
         self.skip_newlines();
         let body = self
-            .parse_statement_block(&["when", "define", "var", "list", "costume", "end"], false)?;
+            .parse_statement_block(&["when", "define", "var", "list", "costume", "sound", "end"], false)?;
         if self.check_keyword("end") && self.looks_like_event_end() {
             self.advance();
         }
@@ -1350,6 +1392,21 @@ impl Parser {
         if self.check_keyword("item") && self.peek().typ == TokenType::LParen {
             return self.parse_item_of_list_expr();
         }
+        if self.word_at_offset(0).as_deref() == Some("index") && self.word_at_offset(1).as_deref() == Some("of") {
+            let pos = self.advance().pos;
+            self.advance();
+            let index = Box::new(self.parse_wrapped_expression()?);
+            self.consume_keyword("in", "Expected 'in' in 'index of (...) in [list]'.")?;
+            let list_name = self.parse_list_field_name()?;
+            return Ok(Expr::ListItemNumber { pos, list_name, index });
+        }
+        if self.word_at_offset(0).as_deref() == Some("letter") && self.peek().typ == TokenType::LParen {
+            let pos = self.advance().pos;
+            let left = Box::new(self.parse_wrapped_expression()?);
+            self.consume_keyword("of", "Expected 'of' in 'letter (...) of (...)'.")?;
+            let right = Box::new(self.parse_wrapped_expression()?);
+            return Ok(Expr::Binary { pos, op: "letter_of".to_string(), left, right });
+        }
         if self.check_keyword("length")
             && self
                 .word_at_offset(1)
@@ -1370,6 +1427,11 @@ impl Parser {
         }
         if self.check_keyword("key") && self.peek().typ == TokenType::LParen {
             return self.parse_key_pressed_expr();
+        }
+        if self.word_at_offset(0).as_deref() == Some("distance") && self.word_at_offset(1).as_deref() == Some("to") {
+            let pos = self.advance().pos;
+            self.advance();
+            return Ok(Expr::DistanceTo { pos, target: Box::new(self.parse_wrapped_expression()?) });
         }
         if self.check_keyword("touching")
             && (self.peek().typ == TokenType::LParen
@@ -1401,6 +1463,34 @@ impl Parser {
                 op: token.value.to_lowercase(),
                 value: Box::new(value),
             });
+        }
+        // Match built-ins before ordinary variable references. Bracketed names
+        // remain available for variables which share these words.
+        for (words, kind) in [
+            (&["x", "position"][..], "x_position"),
+            (&["y", "position"][..], "y_position"),
+            (&["direction"][..], "direction"),
+            (&["size"][..], "size"),
+            (&["volume"][..], "volume"),
+            (&["username"][..], "username"),
+            (&["loudness"][..], "loudness"),
+            (&["mouse", "down?"][..], "mouse_down"),
+            (&["mouse", "down"][..], "mouse_down"),
+            (&["costume", "number"][..], "costume_number"),
+            (&["costume", "name"][..], "costume_name"),
+            (&["backdrop", "number"][..], "backdrop_number"),
+            (&["backdrop", "name"][..], "backdrop_name"),
+            (&["days", "since"][..], "days_since_2000"),
+        ] {
+            if words.iter().enumerate().all(|(i, word)| self.word_at_offset(i).as_deref() == Some(*word)) {
+                let pos = self.advance().pos;
+                for _ in 1..words.len() { self.advance(); }
+                if kind == "days_since_2000" {
+                    let year = self.consume_type(TokenType::Number, "Expected 2000 after 'days since'.")?;
+                    if year.value != "2000" { return self.error_here("Expected 2000 after 'days since'."); }
+                }
+                return Ok(Expr::BuiltinReporter { pos, kind: kind.to_string() });
+            }
         }
         if self.check_keyword("answer") {
             let start = self.consume_keyword("answer", "Expected 'answer'.")?.pos;
@@ -1910,7 +2000,7 @@ impl Parser {
         if token.typ == TokenType::Op {
             return Some(token.value.clone());
         }
-        if token.typ == TokenType::Keyword && (token.value == "and" || token.value == "or") {
+        if token.typ == TokenType::Keyword && matches!(token.value.as_str(), "and" | "or" | "contains") {
             return Some(token.value.clone());
         }
         None
@@ -2054,7 +2144,7 @@ fn precedence_of(op: &str) -> Option<i32> {
     match op {
         "or" => Some(1),
         "and" => Some(2),
-        "=" | "==" | "!=" | "<" | "<=" | ">" | ">=" => Some(3),
+        "=" | "==" | "!=" | "<" | "<=" | ">" | ">=" | "contains" => Some(3),
         "+" | "-" => Some(4),
         "*" | "/" | "%" => Some(5),
         _ => None,

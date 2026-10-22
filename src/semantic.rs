@@ -870,7 +870,7 @@ fn analyze_expr(
             list_name,
             index,
             pos,
-        } => {
+        } | Expr::ListItemNumber { list_name, index, pos } => {
             ensure_list_exists(target, list_name, lists, target_infos, pos.line, pos.column)?;
             analyze_expr(target, index, variables, lists, target_infos, param_scope)
         }
@@ -894,7 +894,7 @@ fn analyze_expr(
         Expr::KeyPressed { key, .. } => {
             analyze_expr(target, key, variables, lists, target_infos, param_scope)
         }
-        Expr::TouchingObject { target: value, .. } => {
+        Expr::TouchingObject { target: value, .. } | Expr::DistanceTo { target: value, .. } => {
             analyze_expr(target, value, variables, lists, target_infos, param_scope)
         }
         Expr::TouchingColor { color, .. } => {

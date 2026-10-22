@@ -41,7 +41,9 @@ where
         report_progress(&mut progress, 1, 1, "Decompiling targets");
     }
     for (index, target) in targets.iter().enumerate() {
-        decompiled_targets.push(decompile_target(target)?);
+        decompiled_targets.push(decompile_target(target).with_context(|| format!(
+            "Decompiling target '{}'", target.get("name").and_then(Value::as_str).unwrap_or("?")
+        ))?);
         report_progress(
             &mut progress,
             index + 1,
@@ -50,6 +52,17 @@ where
         );
     }
 
+    // Validate all references before publishing any source files.
+    for target in &decompiled_targets {
+        for asset in target.costumes.iter().chain(&target.sounds) {
+            if !assets.contains_key(&asset.path) {
+                return Err(anyhow!("Referenced asset '{}' is missing from the archive.", asset.path));
+            }
+            if Path::new(&asset.path).components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+                return Err(anyhow!("Invalid archive asset path '{}'.", asset.path));
+            }
+        }
+    }
     if split_sprites {
         let out_dir = match output {
             Some(path) => path.to_path_buf(),
@@ -91,9 +104,18 @@ struct DecompiledTarget {
     is_stage: bool,
     variables: Vec<DecompiledVariableDecl>,
     lists: Vec<DecompiledListDecl>,
-    costumes: Vec<String>,
+    costumes: Vec<DecompiledAsset>,
+    sounds: Vec<DecompiledAsset>,
+    properties: Map<String, Value>,
     procedures: Vec<DecompiledProcedure>,
     scripts: Vec<DecompiledScript>,
+}
+
+#[derive(Debug, Clone)]
+struct DecompiledAsset {
+    path: String,
+    name: String,
+    metadata: Map<String, Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -135,7 +157,12 @@ fn decompile_target(target: &Value) -> Result<DecompiledTarget> {
 
     let variables = read_variable_decls(target.get("variables"));
     let lists = read_list_decls(target.get("lists"));
-    let costumes = read_costumes(target.get("costumes"));
+    let costumes = read_assets(target.get("costumes"))?;
+    let sounds = read_assets(target.get("sounds"))?;
+    let properties = ["currentCostume", "volume", "layerOrder", "x", "y", "size",
+        "direction", "visible", "draggable", "rotationStyle", "tempo",
+        "videoTransparency", "videoState", "textToSpeechLanguage"]
+        .into_iter().filter_map(|key| target.get(key).map(|v| (key.to_string(), v.clone()))).collect();
 
     let blocks_obj = target
         .get("blocks")
@@ -159,7 +186,8 @@ fn decompile_target(target: &Value) -> Result<DecompiledTarget> {
             "event_whenflagclicked"
             | "event_whenthisspriteclicked"
             | "event_whenbroadcastreceived"
-            | "event_whenkeypressed" => script_starts.push(id.clone()),
+            | "event_whenkeypressed"
+            | "control_start_as_clone" => script_starts.push(id.clone()),
             _ => {}
         }
     }
@@ -183,6 +211,8 @@ fn decompile_target(target: &Value) -> Result<DecompiledTarget> {
         variables,
         lists,
         costumes,
+        sounds,
+        properties,
         procedures,
         scripts,
     })
@@ -243,17 +273,22 @@ fn read_list_decls(node: Option<&Value>) -> Vec<DecompiledListDecl> {
     out
 }
 
-fn read_costumes(node: Option<&Value>) -> Vec<String> {
+fn read_assets(node: Option<&Value>) -> Result<Vec<DecompiledAsset>> {
     let mut out = Vec::new();
     let Some(arr) = node.and_then(Value::as_array) else {
-        return out;
+        return Ok(out);
     };
-    for costume in arr {
-        if let Some(md5ext) = costume.get("md5ext").and_then(Value::as_str) {
-            out.push(md5ext.to_string());
-        }
+    for asset in arr {
+        let mut metadata = asset.as_object().cloned().context("Asset must be an object")?;
+        let path = metadata.remove("md5ext").and_then(|v| v.as_str().map(str::to_string))
+            .context("Asset is missing md5ext")?;
+        let name = metadata.remove("name").and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_else(|| path.clone());
+        metadata.remove("assetId");
+        metadata.remove("dataFormat");
+        out.push(DecompiledAsset { path, name, metadata });
     }
-    out
+    Ok(out)
 }
 
 fn block_sort_key(blocks: &Map<String, Value>, id: &str) -> (i64, i64, String) {
@@ -322,6 +357,7 @@ fn decompile_script(blocks: &Map<String, Value>, hat_id: &str) -> Result<Decompi
     let header = match opcode {
         "event_whenflagclicked" => "when flag clicked".to_string(),
         "event_whenthisspriteclicked" => "when this sprite clicked".to_string(),
+        "control_start_as_clone" => "when I start as a clone".to_string(),
         "event_whenbroadcastreceived" => {
             let msg = field_first_string(hat, "BROADCAST_OPTION")
                 .unwrap_or_else(|| "message1".to_string());
@@ -777,10 +813,7 @@ fn decompile_statement(
             let v = expr_from_input(blocks, block, "COLOR")?;
             out.push(format!("{}set pen color to ({})", pad, v));
         }
-        _ => out.push(format!(
-            "{}# unsupported opcode: {} (block {})",
-            pad, op, id
-        )),
+        _ => return Err(anyhow!("Unsupported command '{}' (block '{}'); refusing to omit it.", op, id)),
     }
     Ok(out)
 }
@@ -843,13 +876,25 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
         "data_variable" => format_var_ref(
             field_first_string(block, "VARIABLE").unwrap_or_else(|| "var".to_string()),
         ),
-        "argument_reporter_string_number" => {
+        "argument_reporter_string_number" | "argument_reporter_boolean" => {
             format_var_ref(field_first_string(block, "VALUE").unwrap_or_default())
         }
         "sensing_answer" => "answer".to_string(),
         "sensing_mousex" => "mouse x".to_string(),
         "sensing_mousey" => "mouse y".to_string(),
         "sensing_timer" => "timer".to_string(),
+        "sensing_mousedown" => "mouse down?".to_string(),
+        "motion_xposition" => "x position".to_string(),
+        "motion_yposition" => "y position".to_string(),
+        "motion_direction" => "direction".to_string(),
+        "looks_size" => "size".to_string(),
+        "sound_volume" => "volume".to_string(),
+        "sensing_username" => "username".to_string(),
+        "sensing_loudness" => "loudness".to_string(),
+        "sensing_dayssince2000" => "days since 2000".to_string(),
+        "looks_costumenumbername" | "looks_backdropnumbername" => format!("{} {}",
+            if op == "looks_costumenumbername" { "costume" } else { "backdrop" },
+            if field_first_string(block, "NUMBER_NAME").as_deref() == Some("name") { "name" } else { "number" }),
         "operator_round" => format!("round ({})", expr_from_input(blocks, block, "NUM")?),
         "operator_mathop" => {
             let op_name =
@@ -875,6 +920,10 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
             let idx = expr_from_input(blocks, block, "INDEX")?;
             format!("item ({}) of [{}]", idx, format_bracket_name(&list))
         }
+        "data_itemnumoflist" => {
+            let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
+            format!("index of ({}) in [{}]", expr_from_input(blocks, block, "ITEM")?, format_bracket_name(&list))
+        }
         "data_lengthoflist" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             format!("length of [{}]", format_bracket_name(&list))
@@ -882,6 +931,7 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
         "operator_length" => {
             format!("length of ({})", expr_from_input(blocks, block, "STRING")?)
         }
+        "operator_join" => format!("join ({}) with ({})", expr_from_input(blocks, block, "STRING1")?, expr_from_input(blocks, block, "STRING2")?),
         "data_listcontents" => {
             let list = field_first_string(block, "LIST").unwrap_or_else(|| "list".to_string());
             format!("contents of [{}]", format_bracket_name(&list))
@@ -904,6 +954,8 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
             let color = expr_from_input(blocks, block, "COLOR")?;
             format!("touching color ({})", color)
         }
+        "sensing_distanceto" => format!("distance to ({})", expr_from_input(blocks, block, "DISTANCETOMENU")?),
+        "sensing_distancetomenu" => quote_str(&field_first_string(block, "DISTANCETOMENU").unwrap_or_else(|| "_mouse_".to_string())),
         "looks_costume" => {
             let name =
                 field_first_string(block, "COSTUME").unwrap_or_else(|| "costume1".to_string());
@@ -925,7 +977,9 @@ fn reporter_expr(blocks: &Map<String, Value>, block_id: &str) -> Result<String> 
         "operator_equals" => binary_expr(blocks, block, "=", "OPERAND1", "OPERAND2")?,
         "operator_and" => binary_expr(blocks, block, "and", "OPERAND1", "OPERAND2")?,
         "operator_or" => binary_expr(blocks, block, "or", "OPERAND1", "OPERAND2")?,
-        _ => "0".to_string(),
+        "operator_contains" => binary_expr(blocks, block, "contains", "STRING1", "STRING2")?,
+        "operator_letter_of" => format!("letter ({}) of ({})", expr_from_input(blocks, block, "LETTER")?, expr_from_input(blocks, block, "STRING")?),
+        _ => return Err(anyhow!("Unsupported reporter '{}' (block '{}'); refusing to replace it with zero.", op, block_id)),
     };
     Ok(expr)
 }
@@ -1013,7 +1067,7 @@ fn procedure_call_shape(block: &Value) -> Result<(String, Vec<String>)> {
 fn proccode_name(proccode: &str) -> String {
     let mut parts = Vec::new();
     for token in proccode.split_whitespace() {
-        if token == "%s" {
+        if matches!(token, "%s" | "%b" | "%n") {
             break;
         }
         parts.push(token);
@@ -1232,6 +1286,9 @@ fn is_reserved_keyword(name: &str) -> bool {
             | "set"
             | "show"
             | "size"
+            | "volume"
+            | "username"
+            | "loudness"
             | "sprite"
             | "stage"
             | "steps"
@@ -1256,7 +1313,7 @@ fn is_reserved_keyword(name: &str) -> bool {
 }
 
 fn quote_str(s: &str) -> String {
-    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\n").replace('\r', "\\r").replace('\t', "\\t"))
 }
 
 fn spaces(n: usize) -> String {
@@ -1303,11 +1360,17 @@ fn render_target(target: &DecompiledTarget) -> String {
         }
         lines.push(line);
     }
-    for costume in &target.costumes {
-        lines.push(format!("  costume {}", quote_str(costume)));
+    if !target.properties.is_empty() {
+        lines.push(format!("  properties {}", quote_str(&serde_json::to_string(&target.properties).unwrap())));
+    }
+    for (kind, assets) in [("costume", &target.costumes), ("sound", &target.sounds)] {
+        for asset in assets {
+            lines.push(format!("  {} {} as {} metadata {}", kind, quote_str(&asset.path),
+                quote_str(&asset.name), quote_str(&serde_json::to_string(&asset.metadata).unwrap())));
+        }
     }
 
-    if (!target.variables.is_empty() || !target.lists.is_empty() || !target.costumes.is_empty())
+    if (!target.variables.is_empty() || !target.lists.is_empty() || !target.costumes.is_empty() || !target.sounds.is_empty() || !target.properties.is_empty())
         && (!target.procedures.is_empty() || !target.scripts.is_empty())
     {
         lines.push(String::new());
@@ -1474,8 +1537,8 @@ fn write_assets_for_targets(
 ) -> Result<()> {
     let mut needed = HashSet::new();
     for target in targets {
-        for costume in &target.costumes {
-            needed.insert(costume.clone());
+        for asset in target.costumes.iter().chain(&target.sounds) {
+            needed.insert(asset.path.clone());
         }
     }
     let mut needed = needed.into_iter().collect::<Vec<_>>();
@@ -1490,6 +1553,8 @@ fn write_assets_for_targets(
                 fs::create_dir_all(parent)?;
             }
             fs::write(path, bytes)?;
+        } else {
+            return Err(anyhow!("Referenced asset '{}' is missing from the archive.", asset_name));
         }
         report_progress(progress, index + 1, needed.len(), progress_label);
     }

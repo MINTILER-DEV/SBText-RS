@@ -36,6 +36,11 @@ pub enum Expr {
         list_name: String,
         index: Box<Expr>,
     },
+    ListItemNumber {
+        pos: Position,
+        list_name: String,
+        index: Box<Expr>,
+    },
     ListLength {
         pos: Position,
         list_name: String,
@@ -58,6 +63,10 @@ pub enum Expr {
         key: Box<Expr>,
     },
     TouchingObject {
+        pos: Position,
+        target: Box<Expr>,
+    },
+    DistanceTo {
         pos: Position,
         target: Box<Expr>,
     },
@@ -111,12 +120,14 @@ impl Expr {
             | Expr::Var { pos, .. }
             | Expr::PickRandom { pos, .. }
             | Expr::ListItem { pos, .. }
+            | Expr::ListItemNumber { pos, .. }
             | Expr::ListLength { pos, .. }
             | Expr::StringLength { pos, .. }
             | Expr::ListContains { pos, .. }
             | Expr::ListContents { pos, .. }
             | Expr::KeyPressed { pos, .. }
             | Expr::TouchingObject { pos, .. }
+            | Expr::DistanceTo { pos, .. }
             | Expr::TouchingColor { pos, .. }
             | Expr::StringJoin { pos, .. }
             | Expr::StringSplit { pos, .. }
@@ -505,6 +516,7 @@ pub enum EventType {
     WhenThisSpriteClicked,
     WhenIReceive(String),
     WhenKeyPressed(String),
+    WhenIStartAsClone,
 }
 
 #[derive(Debug, Clone)]
@@ -527,6 +539,10 @@ pub struct Procedure {
 pub struct CostumeDecl {
     pub pos: Position,
     pub path: String,
+    pub name: Option<String>,
+    /// Original Scratch asset metadata. Presence preserves the source bytes,
+    /// including SVG dimensions, instead of applying authoring normalization.
+    pub metadata: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone)]
@@ -557,6 +573,8 @@ pub struct Target {
     pub variables: Vec<VariableDecl>,
     pub lists: Vec<ListDecl>,
     pub costumes: Vec<CostumeDecl>,
+    pub sounds: Vec<CostumeDecl>,
+    pub properties: serde_json::Map<String, serde_json::Value>,
     pub procedures: Vec<Procedure>,
     pub scripts: Vec<EventScript>,
     pub reporters: Vec<ReporterDecl>,

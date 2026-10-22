@@ -422,6 +422,8 @@ impl<'a> ProjectBuilder<'a> {
             variables: Vec::<VariableDecl>::new(),
             lists: Vec::<ListDecl>::new(),
             costumes: Vec::new(),
+            sounds: Vec::new(),
+            properties: Map::new(),
             procedures: Vec::<Procedure>::new(),
             scripts: Vec::<EventScript>::new(),
             reporters: Vec::<crate::ast::ReporterDecl>::new(),
@@ -578,6 +580,7 @@ impl<'a> ProjectBuilder<'a> {
         )?;
 
         let costumes = self.build_costumes(target)?;
+        let sounds = self.build_sounds(target)?;
         let stage_broadcasts = if target.is_stage {
             let mut m = Map::new();
             for (msg, id) in &self.broadcast_ids {
@@ -598,7 +601,7 @@ impl<'a> ProjectBuilder<'a> {
             "comments": {},
             "currentCostume": 0,
             "costumes": costumes,
-            "sounds": [],
+            "sounds": sounds,
             "volume": 100,
             "layerOrder": layer_order
         });
@@ -625,6 +628,14 @@ impl<'a> ProjectBuilder<'a> {
                     "rotationStyle": "all around"
                 }),
             )?;
+        }
+        for (key, value) in &target.properties {
+            if !matches!(key.as_str(), "currentCostume" | "volume" | "layerOrder" |
+                "x" | "y" | "size" | "direction" | "visible" | "draggable" | "rotationStyle" |
+                "tempo" | "videoTransparency" | "videoState" | "textToSpeechLanguage") {
+                bail!("Unsupported target property '{}' on '{}'.", key, target.name);
+            }
+            set_value_key(&mut target_json, key, value.clone())?;
         }
         Ok(target_json)
     }
@@ -1092,6 +1103,7 @@ impl<'a> ProjectBuilder<'a> {
         let (opcode, fields) = match &script.event_type {
             EventType::WhenFlagClicked => ("event_whenflagclicked", json!({})),
             EventType::WhenThisSpriteClicked => ("event_whenthisspriteclicked", json!({})),
+            EventType::WhenIStartAsClone => ("control_start_as_clone", json!({})),
             EventType::WhenIReceive(msg) => {
                 let bid = self.broadcast_id(msg);
                 (
@@ -3337,6 +3349,17 @@ impl<'a> ProjectBuilder<'a> {
                     "mouse_x" => "sensing_mousex",
                     "mouse_y" => "sensing_mousey",
                     "timer" => "sensing_timer",
+                    "mouse_down" => "sensing_mousedown",
+                    "x_position" => "motion_xposition",
+                    "y_position" => "motion_yposition",
+                    "direction" => "motion_direction",
+                    "size" => "looks_size",
+                    "costume_number" | "costume_name" => "looks_costumenumbername",
+                    "backdrop_number" | "backdrop_name" => "looks_backdropnumbername",
+                    "volume" => "sound_volume",
+                    "username" => "sensing_username",
+                    "loudness" => "sensing_loudness",
+                    "days_since_2000" => "sensing_dayssince2000",
                     _ => bail!("Unsupported built-in reporter '{}'.", kind),
                 };
                 let block_id = self.new_block_id();
@@ -3347,7 +3370,9 @@ impl<'a> ProjectBuilder<'a> {
                         "next": Value::Null,
                         "parent": parent_id,
                         "inputs": {},
-                        "fields": {},
+                        "fields": if kind.starts_with("costume_") || kind.starts_with("backdrop_") {
+                            json!({"NUMBER_NAME": [if kind.ends_with("_number") {"number"} else {"name"}, Value::Null]})
+                        } else { json!({}) },
                         "shadow": false,
                         "topLevel": false
                     }),
@@ -3509,13 +3534,14 @@ impl<'a> ProjectBuilder<'a> {
             }
             Expr::ListItem {
                 list_name, index, ..
-            } => {
+            } | Expr::ListItemNumber { list_name, index, .. } => {
+                let searching = matches!(expr, Expr::ListItemNumber { .. });
                 let list_id = self.lookup_list_id(lists_map, list_name)?;
                 let block_id = self.new_block_id();
                 blocks.insert(
                     block_id.clone(),
                     json!({
-                        "opcode": "data_itemoflist",
+                        "opcode": if searching { "data_itemnumoflist" } else { "data_itemoflist" },
                         "next": Value::Null,
                         "parent": parent_id,
                         "inputs": {},
@@ -3533,7 +3559,7 @@ impl<'a> ProjectBuilder<'a> {
                     param_scope,
                     "number",
                 )?;
-                set_block_input(blocks, &block_id, "INDEX", index_input)?;
+                set_block_input(blocks, &block_id, if searching { "ITEM" } else { "INDEX" }, index_input)?;
                 Ok(Some(block_id))
             }
             Expr::StringLength { text, .. } => {
@@ -3665,16 +3691,18 @@ impl<'a> ProjectBuilder<'a> {
                 );
                 Ok(Some(block_id))
             }
-            Expr::TouchingObject { target, .. } => {
+            Expr::TouchingObject { target, .. } | Expr::DistanceTo { target, .. } => {
+                let distance = matches!(expr, Expr::DistanceTo { .. });
+                let input_name = if distance { "DISTANCETOMENU" } else { "TOUCHINGOBJECTMENU" };
                 let block_id = self.new_block_id();
                 let menu_id = self.new_block_id();
                 blocks.insert(
                     block_id.clone(),
                     json!({
-                        "opcode": "sensing_touchingobject",
+                        "opcode": if distance { "sensing_distanceto" } else { "sensing_touchingobject" },
                         "next": Value::Null,
                         "parent": parent_id,
-                        "inputs": {"TOUCHINGOBJECTMENU": [1, menu_id.clone()]},
+                        "inputs": {(input_name): [1, menu_id.clone()]},
                         "fields": {},
                         "shadow": false,
                         "topLevel": false
@@ -3685,11 +3713,11 @@ impl<'a> ProjectBuilder<'a> {
                 blocks.insert(
                     menu_id,
                     json!({
-                        "opcode": "sensing_touchingobjectmenu",
+                        "opcode": if distance { "sensing_distancetomenu" } else { "sensing_touchingobjectmenu" },
                         "next": Value::Null,
                         "parent": block_id.clone(),
                         "inputs": {},
-                        "fields": {"TOUCHINGOBJECTMENU": [touching_value, Value::Null]},
+                        "fields": {(input_name): [touching_value, Value::Null]},
                         "shadow": true,
                         "topLevel": false
                     }),
@@ -4059,6 +4087,8 @@ impl<'a> ProjectBuilder<'a> {
             "=" | "==" => "operator_equals",
             "and" => "operator_and",
             "or" => "operator_or",
+            "contains" => "operator_contains",
+            "letter_of" => "operator_letter_of",
             _ => bail!("Unsupported binary operator '{}'.", op),
         };
         let (left_key, right_key, kind) = match opcode {
@@ -4067,6 +4097,8 @@ impl<'a> ProjectBuilder<'a> {
             "operator_lt" | "operator_gt" => ("OPERAND1", "OPERAND2", "number"),
             "operator_equals" => ("OPERAND1", "OPERAND2", "string"),
             "operator_and" | "operator_or" => ("OPERAND1", "OPERAND2", "boolean"),
+            "operator_contains" => ("STRING1", "STRING2", "string"),
+            "operator_letter_of" => ("LETTER", "STRING", "string"),
             _ => bail!("Unsupported operator opcode '{}'.", opcode),
         };
 
@@ -4183,6 +4215,8 @@ impl<'a> ProjectBuilder<'a> {
             costumes.push(crate::ast::CostumeDecl {
                 pos: target.pos,
                 path: default_path.to_string(),
+                name: None,
+                metadata: None,
             });
         }
 
@@ -4233,9 +4267,9 @@ impl<'a> ProjectBuilder<'a> {
                     .and_then(|x| x.to_str())
                     .unwrap_or("")
                     .to_lowercase();
-                if ext != "svg" && ext != "png" {
+                if !matches!(ext.as_str(), "svg" | "png" | "jpg" | "jpeg") {
                     bail!(
-                        "Unsupported costume format '.{}' for '{}'. Only .svg and .png are supported.",
+                        "Unsupported costume format '.{}' for '{}'. Use SVG, PNG, or JPEG.",
                         ext,
                         file_path.display()
                     );
@@ -4248,9 +4282,12 @@ impl<'a> ProjectBuilder<'a> {
                     .to_string();
                 (data, ext, name)
             };
-            let name = uniquify_costume_name(&base_name, &mut used_names);
+            let name = if let Some(name) = &costume.name {
+                used_names.insert(name.clone());
+                name.clone()
+            } else { uniquify_costume_name(&base_name, &mut used_names) };
 
-            if ext == "svg" {
+            if ext == "svg" && costume.metadata.is_none() {
                 match self.prepare_svg(&data, &costume.path) {
                     Ok((prepared, cx, cy)) => {
                         data = prepared;
@@ -4282,6 +4319,13 @@ impl<'a> ProjectBuilder<'a> {
             if ext == "png" {
                 set_value_key(&mut entry, "bitmapResolution", json!(1))?;
             }
+            if let Some(metadata) = &costume.metadata {
+                for (key, value) in metadata {
+                    if !matches!(key.as_str(), "name" | "assetId" | "md5ext" | "dataFormat") {
+                        set_value_key(&mut entry, key, value.clone())?;
+                    }
+                }
+            }
             out.push(entry);
         }
         if out.is_empty() {
@@ -4310,6 +4354,38 @@ impl<'a> ProjectBuilder<'a> {
                 "rotationCenterX": cx,
                 "rotationCenterY": cy
             }));
+        }
+        Ok(out)
+    }
+
+    fn build_sounds(&mut self, target: &Target) -> Result<Vec<Value>> {
+        let mut out = Vec::new();
+        let mut used = HashSet::new();
+        for sound in &target.sounds {
+            let mut path = Path::new(&sound.path).to_path_buf();
+            if !path.is_absolute() {
+                path = self.source_dir.join(path);
+            }
+            let data = fs::read(&path).map_err(|e| anyhow!(
+                "Sound file for target '{}': '{}': {}", target.name, path.display(), e
+            ))?;
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+            if !matches!(ext.as_str(), "wav" | "mp3") {
+                bail!("Unsupported sound format '.{}' for '{}'. Use WAV or MP3.", ext, path.display());
+            }
+            let default_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("sound");
+            let name = if let Some(name) = &sound.name {
+                used.insert(name.clone());
+                name.clone()
+            } else { uniquify_costume_name(default_name, &mut used) };
+            let digest = format!("{:x}", md5::compute(&data));
+            let md5ext = format!("{}.{}", digest, ext);
+            self.assets.insert(md5ext.clone(), data);
+            let mut entry = Value::Object(sound.metadata.clone().unwrap_or_default());
+            for (key, value) in [("name", name), ("assetId", digest), ("md5ext", md5ext), ("dataFormat", ext)] {
+                set_value_key(&mut entry, key, json!(value))?;
+            }
+            out.push(entry);
         }
         Ok(out)
     }

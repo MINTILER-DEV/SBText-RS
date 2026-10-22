@@ -89,7 +89,13 @@ sbtext-rs obfuscate INPUT.sb3 -o OUTPUT.sb3 --preset clicker
 - With `--split-sprites`, output is a directory:
   - `main.sbtext` contains the stage block and `import` lines.
   - each sprite is written as its own `.sbtext` file.
-  - costume assets referenced by `md5ext` are extracted beside the output files.
+  - costume and sound assets referenced by `md5ext` are extracted beside the output files.
+  - asset names, original bytes, costume centers/resolution, sound metadata, and initial sprite settings survive recompilation. Imported SVG assets retain their original dimensions even with default SVG scaling enabled.
+  - motion/input/appearance/sound reporters and clone-start scripts are preserved. Unsupported commands/reporters fail with the target, opcode, and block ID instead of silently discarding behavior.
+
+Asset declarations accept an explicit Scratch name: `costume "image.svg" as "bg"` or `sound "door.wav" as "door open"`. Decompiled declarations also carry a quoted JSON `metadata` object, and targets carry a quoted JSON `properties` object for saved position, costume, appearance, volume, and layer settings. Existing path-only costume declarations keep their previous behavior. Sound exports accept WAV and MP3 assets; actual playback format support depends on the runtime.
+
+Already-lossy `.sbtext` exports cannot recover missing assets or reporters. Decompile the original `.sb3` again, then compile the regenerated `main.sbtext`. Disconnected blocks without a recognized event/procedure entry are not exported.
 
 ## SB3 Obfuscation
 
