@@ -297,6 +297,7 @@ fn report_progress(
 #[derive(Clone, Debug)]
 struct ProcedureSignature {
     params: Vec<String>,
+    boolean_params: HashSet<String>,
     arg_ids: Vec<String>,
     proccode: String,
     warp: bool,
@@ -330,6 +331,7 @@ struct ProjectBuilder<'a> {
     global_list_ids: HashMap<String, String>,
     global_list_names: HashMap<String, String>,
     current_reporters: HashMap<String, ReporterDecl>,
+    boolean_params: HashSet<String>,
     current_signatures: HashMap<String, ProcedureSignature>,
 }
 
@@ -348,6 +350,7 @@ impl<'a> ProjectBuilder<'a> {
             global_list_ids: HashMap::new(),
             global_list_names: HashMap::new(),
             current_reporters: HashMap::new(),
+            boolean_params: HashSet::new(),
             current_signatures: HashMap::new(),
         }
     }
@@ -546,6 +549,7 @@ impl<'a> ProjectBuilder<'a> {
                 pos: reporter.pos,
                 name: proc_name.clone(),
                 params: reporter.params.clone(),
+                boolean_params: HashSet::new(),
                 run_without_screen_refresh: false,
                 body: reporter.body.clone(),
             };
@@ -654,7 +658,7 @@ impl<'a> ProjectBuilder<'a> {
             let placeholders = procedure
                 .params
                 .iter()
-                .map(|_| "%s")
+                .map(|name| if procedure.boolean_params.contains(&name.to_lowercase()) { "%b" } else { "%s" })
                 .collect::<Vec<_>>()
                 .join(" ");
             let proccode = if placeholders.is_empty() {
@@ -666,6 +670,7 @@ impl<'a> ProjectBuilder<'a> {
                 procedure.name.to_lowercase(),
                 ProcedureSignature {
                     params: procedure.params.clone(),
+                    boolean_params: procedure.boolean_params.clone(),
                     arg_ids,
                     proccode,
                     warp: procedure.run_without_screen_refresh,
@@ -689,6 +694,7 @@ impl<'a> ProjectBuilder<'a> {
                 format!("__reporter__{}", reporter.name).to_lowercase(),
                 ProcedureSignature {
                     params: reporter.params.clone(),
+                    boolean_params: HashSet::new(),
                     arg_ids,
                     proccode,
                     warp: false,
@@ -1017,6 +1023,7 @@ impl<'a> ProjectBuilder<'a> {
             .get(&procedure.name.to_lowercase())
             .ok_or_else(|| anyhow!("Missing procedure signature for '{}'.", procedure.name))?;
         let definition_id = self.new_block_id();
+        self.boolean_params = signature.boolean_params.clone();
         let prototype_id = self.new_block_id();
         blocks.insert(
             definition_id.clone(),
@@ -1039,7 +1046,7 @@ impl<'a> ProjectBuilder<'a> {
             blocks.insert(
                 reporter_id.clone(),
                 json!({
-                    "opcode": "argument_reporter_string_number",
+                    "opcode": if signature.boolean_params.contains(&param_name.to_lowercase()) { "argument_reporter_boolean" } else { "argument_reporter_string_number" },
                     "next": Value::Null,
                     "parent": prototype_id.clone(),
                     "inputs": {},
@@ -1066,7 +1073,9 @@ impl<'a> ProjectBuilder<'a> {
                     "proccode": signature.proccode,
                     "argumentids": serde_json::to_string(&signature.arg_ids)?,
                     "argumentnames": serde_json::to_string(&signature.params)?,
-                    "argumentdefaults": serde_json::to_string(&vec![""; signature.params.len()])?,
+                    "argumentdefaults": serde_json::to_string(&signature.params.iter().map(|name|
+                        if signature.boolean_params.contains(&name.to_lowercase()) { json!(false) } else { json!("") }
+                    ).collect::<Vec<_>>())?,
                     "warp": if signature.warp { "true" } else { "false" }
                 }
             }),
@@ -1084,6 +1093,7 @@ impl<'a> ProjectBuilder<'a> {
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         )?;
+        self.boolean_params.clear();
         if let Some(fid) = first {
             set_block_next(blocks, &definition_id, Value::String(fid))?;
             return Ok(start_y + 120 + if last.is_some() { 20 } else { 0 });
@@ -1531,6 +1541,13 @@ impl<'a> ProjectBuilder<'a> {
                 )?))
             }
             Statement::SetPenColorParamTo { param, value, .. } => {
+                if param == "rgb" {
+                    let id = self.new_block_id();
+                    let color = self.color_expr_input(blocks, value, &id, variables_map, lists_map, param_scope)?;
+                    blocks.insert(id.clone(), json!({"opcode":"pen_setPenColorToColor", "next":Value::Null,
+                        "parent":parent_id, "inputs":{"COLOR":color}, "fields":{}, "shadow":false, "topLevel":false}));
+                    return Ok(single(id));
+                }
                 Ok(single(self.emit_pen_color_param_stmt(
                     blocks,
                     parent_id,
@@ -2961,7 +2978,7 @@ impl<'a> ProjectBuilder<'a> {
         };
         let block_id = self.new_block_id();
         let mut inputs = Map::new();
-        for (arg_id, expr) in sig.arg_ids.iter().zip(args.iter()) {
+        for ((arg_id, param), expr) in sig.arg_ids.iter().zip(&sig.params).zip(args.iter()) {
             let val = self.expr_input(
                 blocks,
                 expr,
@@ -2969,7 +2986,7 @@ impl<'a> ProjectBuilder<'a> {
                 variables_map,
                 lists_map,
                 param_scope,
-                "string",
+                if sig.boolean_params.contains(&param.to_lowercase()) { "boolean" } else { "string" },
             )?;
             inputs.insert(arg_id.clone(), val);
         }
@@ -3424,7 +3441,7 @@ impl<'a> ProjectBuilder<'a> {
                     blocks.insert(
                         block_id.clone(),
                         json!({
-                            "opcode": "argument_reporter_string_number",
+                            "opcode": if self.boolean_params.contains(&lowered) { "argument_reporter_boolean" } else { "argument_reporter_string_number" },
                             "next": Value::Null,
                             "parent": parent_id,
                             "inputs": {},
@@ -4164,6 +4181,9 @@ impl<'a> ProjectBuilder<'a> {
         lists_map: &HashMap<String, String>,
         param_scope: &HashSet<String>,
     ) -> Result<Value> {
+        if let Expr::Number { value, .. } = expr {
+            return Ok(json!([1, [4, format_num(*value)]]));
+        }
         if let Expr::String { value, .. } = expr {
             return Ok(json!([1, [9, normalize_color_hex(value)]]));
         }

@@ -106,6 +106,8 @@ Asset declarations may end with `metadata "{\"rotationCenterX\":240,\"rotationCe
 Additional built-in expressions: `x position`, `y position`, `direction`, `size`, `volume`, `mouse down?`, `username`, `loudness`, `days since 2000`, `costume number`, `costume name`, `backdrop number`, `backdrop name`, `distance to (target)`, `index of (item) in [list]`, `letter (index) of (text)`, and `(text) contains (text)`. Brackets select variables that share a built-in name, for example `[volume]`.
 
 Clone event scripts use `when I start as a clone`.
+
+Custom blocks declare boolean parameters with angle brackets: `define move <hit> (amount)`. Parentheses continue to declare string/number parameters. Decompiled RGB pen-color blocks use `set pen rgb color to (expr)`; `set pen color to (expr)` retains its existing hue-parameter meaning.
 - `define ... end`
 - `when ...` scripts
 

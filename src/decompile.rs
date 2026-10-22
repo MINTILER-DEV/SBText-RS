@@ -134,6 +134,7 @@ struct DecompiledListDecl {
 struct DecompiledProcedure {
     name: String,
     params: Vec<String>,
+    boolean_params: HashSet<String>,
     warp: bool,
     body: Vec<String>,
 }
@@ -341,11 +342,14 @@ fn decompile_procedure(
         .unwrap_or(false);
 
     let body_start = definition.get("next").and_then(Value::as_str);
+    let boolean_params = proccode.split_whitespace().filter(|s| matches!(*s, "%b" | "%s" | "%n"))
+        .zip(&params).filter_map(|(kind, name)| (kind == "%b").then(|| name.to_lowercase())).collect();
     let body = decompile_chain(blocks, body_start, 4, &mut HashSet::new())?;
 
     Ok(DecompiledProcedure {
         name,
         params,
+        boolean_params,
         warp,
         body,
     })
@@ -811,7 +815,7 @@ fn decompile_statement(
         }
         "pen_setPenColorToColor" => {
             let v = expr_from_input(blocks, block, "COLOR")?;
-            out.push(format!("{}set pen color to ({})", pad, v));
+            out.push(format!("{}set pen rgb color to ({})", pad, v));
         }
         _ => return Err(anyhow!("Unsupported command '{}' (block '{}'); refusing to omit it.", op, id)),
     }
@@ -1383,7 +1387,8 @@ fn render_target(target: &DecompiledTarget) -> String {
             format_decl_name(&proc_def.name)
         );
         for param in &proc_def.params {
-            header.push_str(&format!(" ({})", format_decl_name(param)));
+            let (open, close) = if proc_def.boolean_params.contains(&param.to_lowercase()) { ("<", ">") } else { ("(", ")") };
+            header.push_str(&format!(" {}{}{}", open, format_decl_name(param), close));
         }
         lines.push(header);
         if proc_def.body.is_empty() {

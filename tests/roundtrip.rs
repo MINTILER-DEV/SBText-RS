@@ -69,7 +69,11 @@ fn fixture() -> Sb3Archive {
     );
     blocks.insert(
         "clone-body".into(),
-        json!({"opcode":"motion_movesteps","inputs":{"STEPS":[1,[4,"3"]]}}),
+        json!({"opcode":"motion_movesteps","inputs":{"STEPS":[1,[4,"3"]]},"next":"rgb"}),
+    );
+    blocks.insert(
+        "rgb".into(),
+        json!({"opcode":"pen_setPenColorToColor","inputs":{"COLOR":[1,[9,"#ff8000"]]}}),
     );
     blocks.insert("distance-menu".into(), json!({"opcode":"sensing_distancetomenu","fields":{"DISTANCETOMENU":["_mouse_",null]},"shadow":true}));
     blocks.insert("sound-menu".into(), json!({"opcode":"sound_sounds_menu","fields":{"SOUND_MENU":["door open",null]},"shadow":true}));
@@ -192,4 +196,45 @@ fn missing_sound_assets_fail_instead_of_disappearing() {
     let error = decompile_sb3(&input, Some(&temp.path().join("out.sbtext")), false).unwrap_err();
     assert!(error.to_string().contains("missing from the archive"));
     assert!(!temp.path().join("out.sbtext").exists());
+}
+
+#[test]
+fn boolean_procedure_parameters_keep_their_type_and_matching_call_shape() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut p = fixture();
+    p.project["targets"][1]["blocks"] = json!({
+        "flag":{"opcode":"event_whenflagclicked","topLevel":true,"next":"call"},
+        "call":{"opcode":"procedures_call","mutation":{"proccode":"move %b %s","argumentids":"[\"b\",\"n\"]"},"inputs":{"b":[2,"condition"],"n":[1,[4,"5"]]}},
+        "condition":{"opcode":"operator_gt","inputs":{"OPERAND1":[1,[4,"2"]],"OPERAND2":[1,[4,"1"]]}},
+        "def":{"opcode":"procedures_definition","topLevel":true,"inputs":{"custom_block":[1,"proto"]},"next":"if"},
+        "proto":{"opcode":"procedures_prototype","mutation":{"proccode":"move %b %s","argumentids":"[\"b\",\"n\"]","argumentnames":"[\"hit\",\"amount\"]","argumentdefaults":"[false,\"\"]","warp":"true"}},
+        "if":{"opcode":"control_if","inputs":{"CONDITION":[2,"hit"],"SUBSTACK":[2,"move"]}},
+        "hit":{"opcode":"argument_reporter_boolean","fields":{"VALUE":["hit",null]}},
+        "move":{"opcode":"motion_movesteps","inputs":{"STEPS":[2,"amount"]}},
+        "amount":{"opcode":"argument_reporter_string_number","fields":{"VALUE":["amount",null]}}
+    });
+    let input = temp.path().join("original.sb3");
+    let output = temp.path().join("game.sbtext");
+    sb3::write_sb3_file(&input, &p).unwrap();
+    decompile_sb3(&input, Some(&output), false).unwrap();
+    let rebuilt = sb3::read_sb3_bytes(&compile_entry_to_sb3_bytes(&output, true).unwrap()).unwrap();
+    let blocks = rebuilt.project["targets"][1]["blocks"].as_object().unwrap();
+    let proto = blocks
+        .values()
+        .find(|b| b["opcode"] == "procedures_prototype")
+        .unwrap();
+    let call = blocks
+        .values()
+        .find(|b| b["opcode"] == "procedures_call")
+        .unwrap();
+    assert_eq!(proto["mutation"]["proccode"], "move %b %s");
+    assert_eq!(call["mutation"]["proccode"], proto["mutation"]["proccode"]);
+    assert_eq!(proto["mutation"]["argumentdefaults"], "[false,\"\"]");
+    assert_eq!(
+        blocks
+            .values()
+            .filter(|b| b["opcode"] == "argument_reporter_boolean")
+            .count(),
+        2
+    );
 }

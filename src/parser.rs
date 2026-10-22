@@ -211,13 +211,20 @@ impl Parser {
         }
         let name = self.parse_decl_name_token()?;
         let mut params = Vec::new();
-        while self.check_type(TokenType::LParen) {
-            self.consume_type(TokenType::LParen, "Expected '('.")?;
+        let mut boolean_params = HashSet::new();
+        while self.check_type(TokenType::LParen) || (self.check_type(TokenType::Op) && self.current().value == "<") {
+            let boolean = self.current().value == "<";
+            self.advance();
             if self.check_type(TokenType::RParen) {
                 return self.error_here("Empty parameter declaration is not allowed.");
             }
             let param = self.parse_decl_name_token()?;
-            self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
+            if boolean {
+                if !self.match_operator(">") { return self.error_here("Expected '>' after boolean parameter name."); }
+                boolean_params.insert(param.to_lowercase());
+            } else {
+                self.consume_type(TokenType::RParen, "Expected ')' after parameter name.")?;
+            }
             params.push(param);
         }
         run_without_screen_refresh =
@@ -229,6 +236,7 @@ impl Parser {
             pos,
             name,
             params,
+            boolean_params,
             run_without_screen_refresh,
             body,
         })
@@ -1098,6 +1106,12 @@ impl Parser {
     }
 
     fn parse_set_pen_stmt(&mut self, start: Position) -> Result<Statement, ParseError> {
+        if self.word_at_offset(0).as_deref() == Some("rgb") {
+            self.advance();
+            self.consume_keyword("color", "Expected 'color' after 'set pen rgb'.")?;
+            self.consume_keyword("to", "Expected 'to' after 'set pen rgb color'.")?;
+            return Ok(Statement::SetPenColorParamTo { pos: start, param: "rgb".to_string(), value: self.parse_wrapped_expression()? });
+        }
         let param = self.parse_pen_param_name()?;
         if param == "size" {
             self.consume_keyword("to", "Expected 'to' in 'set pen size to'.")?;
