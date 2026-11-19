@@ -1,0 +1,444 @@
+sprite Renderer
+properties "{\"visible\":false,\"rotationStyle\":\"don't rotate\"}"
+@@COSTUMES@@
+var ri = 0
+var rj = 0
+var rx = 0
+var ry = 0
+var tailY = 0
+var headY = 0
+var laneX = 0
+var receptorY = 112
+var scrollSign = 1
+var poseFrame = 0
+var glyphIndex = 0
+var glyphNumber = 0
+var textBrightness = 0
+var lineIndex = 0
+var displayIndex = 0
+var rowY = 0
+var healthX = 0
+var progress = 0
+var animationPose = 0
+var cameraX = 0
+list laneXs = [-183, -139, -95, -51, 51, 95, 139, 183]
+list noteColors = ["#c24b99", "#00ffff", "#12fa05", "#f9393f"]
+list menuLabels = ["STORY MODE", "FREEPLAY", "OPTIONS", "HOW TO PLAY", "CREDITS"]
+list optionLabels = ["DOWNSCROLL", "GHOST TAPPING", "PRACTICE", "BOTPLAY", "OFFSET MS", "VOLUME"]
+@@GLYPHS@@
+
+define !image (assetName) (imageX) (imageY) (imageScale)
+  clear graphic effects
+  switch costume to (assetName)
+  set size to (imageScale)
+  go to x (imageX) y (imageY)
+  stamp
+end
+
+define !line (xOne) (yOne) (xTwo) (yTwo) (lineColor) (thickness)
+  pen up
+  set pen size to (thickness)
+  set pen rgb color to (lineColor)
+  go to x (xOne) y (yOne)
+  pen down
+  go to x (xTwo) y (yTwo)
+  pen up
+end
+
+define !text (txt) (textX) (textY) (fontScale)
+  clear graphic effects
+  set graphic effect [brightness] to (textBrightness)
+  set size to (fontScale)
+  set [glyphIndex] to (1)
+  repeat (length of (txt))
+    set [glyphNumber] to (index of (letter (glyphIndex) of (txt)) in [glyphChars])
+    if glyphNumber > 0 then
+      switch costume to (item (glyphNumber) of [glyphCostumes])
+      go to x (textX + ((glyphIndex - 1) * 9 * fontScale / 100)) y (textY)
+      stamp
+    end
+    change [glyphIndex] by (1)
+  end
+  clear graphic effects
+end
+
+define !menuBackground
+  image ("menu-bg") (0) (0) (100)
+  set [textBrightness] to (0)
+  text ("SBTEXT-RS / FNF") (-222) (-161) (65)
+  text ("ENTER SELECT   ESC BACK") (36) (-161) (65)
+end
+
+define !header (titleText) (subtitleText)
+  line (-240) (141) (240) (141) ("#171220") (62)
+  set [textBrightness] to (0)
+  text (titleText) (-218) (149) (145)
+  text (subtitleText) (-217) (121) (65)
+end
+
+define !drawTitle
+  menuBackground
+  image ("logo") (-53) (67) (115 + (sin (timer * 180) * 2))
+  image ("char-gf-0") (111) (-18) (95)
+  image (join ("char-bf-") with ((floor (timer * 6)) % 3)) (155) (-59) (120)
+  line (-205) (-97) (39) (-97) ("#171220") (36)
+  text ("PRESS ENTER") (-184) (-96) (155)
+  set [textBrightness] to (-100)
+  text ("FRIDAY NIGHT FUNKIN'") (-210) (-130) (80)
+end
+
+define !drawMainMenu
+  menuBackground
+  image ("logo") (133) (78) (68)
+  image (join ("char-gf-") with ((floor (timer * 6)) % 3)) (104) (-44) (85)
+  image (join ("char-bf-") with ((floor (timer * 6)) % 3)) (166) (-69) (95)
+  set [ri] to (1)
+  repeat (5)
+    set [rowY] to (94 - (ri * 39))
+    if ri = selection then
+      line (-214) (rowY) (25) (rowY) ("#171220") (31)
+      set [textBrightness] to (0)
+    else
+      set [textBrightness] to (-100)
+    end
+    text (item (ri) of [menuLabels]) (-207) (rowY) (125)
+    change [ri] by (1)
+  end
+end
+
+define !difficultyLabel
+  set [textBrightness] to (0)
+  text (join ("< ") with (join (item (difficulty) of [difficultyNames]) with (" >"))) (64) (96) (110)
+  set [textBrightness] to (-100)
+  text ("LEFT / RIGHT") (86) (72) (60)
+end
+
+define !drawFreeplay
+  menuBackground
+  header ("FREEPLAY") (join (length of [trackTitles]) with (" ORIGINAL CHART SETS / UP-DOWN TO BROWSE"))
+  difficultyLabel
+  image (join ("char-") with (join (item (selectedTrack) of [trackPlayers]) with (join ("-") with ((floor (timer * 6)) % 3)))) (150) (-35) (105)
+  set [ri] to (-3)
+  repeat (7)
+    set [displayIndex] to ((((selectedTrack + ri) - 1) % (length of [trackTitles])) + 1)
+    set [rowY] to (10 - (ri * 27))
+    if ri = 0 then
+      line (-215) (rowY) (35) (rowY) ("#171220") (25)
+      set [textBrightness] to (0)
+      text (item (displayIndex) of [trackShortTitles]) (-211) (rowY) (95)
+    else
+      set [textBrightness] to (-100)
+      text (item (displayIndex) of [trackShortTitles]) (-211) (rowY) (85)
+    end
+    change [ri] by (1)
+  end
+  set [textBrightness] to (-100)
+  text (join (selectedTrack) with (join (" / ") with (length of [trackTitles]))) (-209) (-108) (70)
+  text (join ("BEST ") with (item (chartIndex) of [highScores])) (-209) (-130) (75)
+  text (join ("BOTPLAY ") with (item (botplay + 1) of [toggleNames])) (73) (-130) (70)
+end
+
+define !drawStory
+  menuBackground
+  header ("STORY MODE") ("TUTORIAL / WEEKS 1-7 / WEEKEND 1 / BONUS")
+  difficultyLabel
+  set [textBrightness] to (-100)
+  text (join ("< ") with (join (item (weekIndex) of [weekTitles]) with (" >"))) (-209) (78) (115)
+  image (join ("char-") with (join (item (selectedTrack) of [trackOpponents]) with (join ("-") with ((floor (timer * 6)) % 3)))) (142) (-35) (100)
+  text ("TRACKLIST") (-208) (35) (75)
+  set [ri] to (item (weekIndex) of [weekStarts])
+  set [rj] to (0)
+  repeat ((item (weekIndex) of [weekEnds]) - ri + 1)
+    text (item (item (ri) of [weekTracks]) of [trackTitles]) (-205) (10 - (rj * 25)) (90)
+    change [ri] by (1)
+    change [rj] by (1)
+  end
+  text ("UP / DOWN: CHANGE WEEK") (-205) (-112) (70)
+  text ("ENTER: START CAMPAIGN") (-205) (-135) (70)
+end
+
+define !drawOptions
+  menuBackground
+  header ("OPTIONS") ("UP/DOWN SELECT / LEFT/RIGHT CHANGE")
+  set [ri] to (1)
+  repeat (6)
+    set [rowY] to (89 - (ri * 30))
+    if ri = optionIndex then
+      line (-213) (rowY) (205) (rowY) ("#171220") (27)
+      set [textBrightness] to (0)
+    else
+      set [textBrightness] to (-100)
+    end
+    text (item (ri) of [optionLabels]) (-201) (rowY) (105)
+    if ri = 1 then
+      text (item (downscroll + 1) of [toggleNames]) (127) (rowY) (105)
+    end
+    if ri = 2 then
+      text (item (ghostTapping + 1) of [toggleNames]) (127) (rowY) (105)
+    end
+    if ri = 3 then
+      text (item (practice + 1) of [toggleNames]) (127) (rowY) (105)
+    end
+    if ri = 4 then
+      text (item (botplay + 1) of [toggleNames]) (127) (rowY) (105)
+    end
+    if ri = 5 then
+      text (audioOffset) (127) (rowY) (105)
+    end
+    if ri = 6 then
+      text (masterVolume) (127) (rowY) (105)
+    end
+    change [ri] by (1)
+  end
+  set [textBrightness] to (-100)
+  text ("PRACTICE AND BOTPLAY DO NOT SET RECORDS") (-204) (-128) (65)
+end
+
+define !drawInfo
+  menuBackground
+  if mode = "controls" then
+    header ("HOW TO PLAY") ("MATCH THE NOTES AS THEY REACH YOUR RECEPTORS")
+    set [textBrightness] to (-100)
+    text ("PLAY THE RIGHT-HAND LANES") (-210) (83) (95)
+    text ("ARROWS / A S W D / H J K L") (-210) (48) (105)
+    text ("HOLD LONG NOTES UNTIL THEIR TAILS END") (-210) (10) (80)
+    text ("P / ESC: PAUSE   ENTER: RESUME") (-210) (-24) (90)
+    text ("PAUSE WAITS FOR THE NEXT AUDIO BOUNDARY") (-210) (-50) (70)
+    text ("R: RETRY FROM PAUSE   SPACE: RETURN") (-210) (-79) (75)
+    text ("B: TOGGLE BOTPLAY IN FREEPLAY") (-210) (-112) (80)
+  else
+    header ("CREDITS") ("AN UNOFFICIAL SBTEXT REMAKE / ORIGINAL FNF ASSETS")
+    set [textBrightness] to (-100)
+    text ("THE FUNKIN' CREW") (-210) (80) (130)
+    text ("NINJAMUFFIN99 / PHANTOMARCADE") (-210) (43) (90)
+    text ("KAWAI SPRITE / EVILSK8R") (-210) (14) (95)
+    text ("CHARTS, MUSIC, ART: FUNKINCREW/FUNKIN.ASSETS") (-210) (-23) (65)
+    text ("TIMING, SCORING: FUNKINCREW/FUNKIN") (-210) (-48) (70)
+    text ("ART REFERENCES: FUNKINCREW/FUNKIN.ART") (-210) (-73) (70)
+    text ("ADDITIONAL ARTISTS: SEE UPSTREAM CREDITS") (-210) (-110) (70)
+  end
+end
+
+define !drawCharacters
+  set [poseFrame] to ((floor (beat * 6)) % 3)
+  if item (selectedTrack) of [trackGirlfriends] != "" then
+    image (join ("char-") with (join (item (selectedTrack) of [trackGirlfriends]) with (join ("-") with (poseFrame)))) (cameraX) (5) (65)
+  end
+  set [animationPose] to (0)
+  if songms < opponentUntil and rawms >= 0 then
+    set [animationPose] to (opponentPose)
+  end
+  image (join ("char-") with (join (item (selectedTrack) of [trackOpponents]) with (join ("-") with ((animationPose * 3) + poseFrame)))) (-116 + cameraX) (-22) (85)
+  set [animationPose] to (0)
+  if songms < playerUntil and rawms >= 0 then
+    set [animationPose] to (playerPose)
+  end
+  image (join ("char-") with (join (item (selectedTrack) of [trackPlayers]) with (join ("-") with ((animationPose * 3) + poseFrame)))) (124 + cameraX) (-22) (85)
+end
+
+define !drawReceptors
+  set [ri] to (1)
+  repeat (8)
+    set [rj] to (4 + ((ri - 1) % 4))
+    if (item (ri) of [receptorFlash]) > songms and rawms >= 0 then
+      change [rj] by (4)
+    else
+      if ri > 4 then
+        if item (ri - 4) of [held] = 1 then
+          change [rj] by (4)
+        end
+      end
+    end
+    image (join ("note-") with (rj)) (item (ri) of [laneXs]) (receptorY) (100)
+    change [ri] by (1)
+  end
+end
+
+define !drawNotes
+  set [ri] to (firstNote)
+  repeat until ri > noteCount or (item (ri) of [noteTimes]) > songms + (270 / scrollSpeed)
+    set [rj] to ((item (ri) of [noteLanes]) % 4)
+    if item (ri) of [noteLanes] < 4 then
+      set [laneX] to (item (rj + 5) of [laneXs])
+    else
+      set [laneX] to (item (rj + 1) of [laneXs])
+    end
+    set [headY] to (receptorY - (((item (ri) of [noteTimes]) - songms) * scrollSpeed * scrollSign))
+    if item (ri) of [noteLengths] > 20 then
+      if item (ri) of [noteStates] != 2 or item (ri) of [noteLanes] >= 4 then
+        set [tailY] to (receptorY - ((((item (ri) of [noteTimes]) + (item (ri) of [noteLengths])) - songms) * scrollSpeed * scrollSign))
+        if tailY < -133 then
+          set [tailY] to (-133)
+        end
+        if tailY > 133 then
+          set [tailY] to (133)
+        end
+        set [ry] to (headY)
+        if item (ri) of [noteStates] = 1 or (item (ri) of [noteLanes] >= 4 and item (ri) of [noteTimes] <= songms) then
+          set [ry] to (receptorY)
+        end
+        if ry > 133 then
+          set [ry] to (133)
+        end
+        if ry < -133 then
+          set [ry] to (-133)
+        end
+        if (item (ri) of [noteTimes]) + (item (ri) of [noteLengths]) > songms then
+          line (laneX) (ry) (laneX) (tailY) (item (rj + 1) of [noteColors]) (8)
+        end
+      end
+    end
+    if headY >= -133 and headY <= 140 then
+      if item (ri) of [noteStates] = 0 or item (ri) of [noteStates] = -1 then
+        image (join ("note-") with (rj)) (laneX) (headY) (100)
+      end
+    end
+    change [ri] by (1)
+  end
+end
+
+define !drawHud
+  set [textBrightness] to (0)
+  text (item (selectedTrack) of [trackHudTitles]) (-222) (164) (80)
+  text (item (difficulty) of [difficultyNames]) (137) (164) (70)
+  set [progress] to (rawms / songDuration)
+  if progress < 0 then
+    set [progress] to (0)
+  end
+  if progress > 1 then
+    set [progress] to (1)
+  end
+  line (-221) (143) (221) (143) ("#4a4055") (3)
+  line (-221) (143) (-221 + (442 * progress)) (143) ("#3df7ff") (3)
+  line (-170) (-150) (170) (-150) ("#ec2f4b") (10)
+  set [healthX] to (170 - (health * 170))
+  line (healthX) (-150) (170) (-150) ("#66ff33") (10)
+  image (join ("icon-") with (item (selectedTrack) of [trackOpponents])) (healthX - 18) (-148) (70)
+  image (join ("icon-") with (item (selectedTrack) of [trackPlayers])) (healthX + 18) (-148) (70)
+  text (join ("SCORE ") with (score)) (-222) (-170) (67)
+  text (join ("MISSES ") with (misses)) (-55) (-170) (67)
+  text (join (accuracy) with ("%")) (85) (-170) (67)
+  text (join (floor ((songDuration - rawms) / 1000)) with ("S")) (182) (-170) (67)
+  if ratingUntil > songms and rawms >= 0 then
+    if rating = "SICK" or rating = "GOOD" or rating = "BAD" or rating = "SHIT" then
+      image (join ("ui-") with (rating)) (0) (36) (80)
+    else
+      text (rating) (-31) (36) (75)
+    end
+    text (combo) (-7) (7) (110)
+  end
+  if botplay = 1 then
+    text ("BOTPLAY") (-27) (-114) (70)
+  end
+  if practice = 1 then
+    text ("PRACTICE") (-31) (-130) (65)
+  end
+  if pauseWanted = 1 then
+    text ("PAUSING...") (-39) (72) (80)
+  end
+  if rawms < 0 then
+    if rawms > (-180000 / currentBpm) and rawms <= (-120000 / currentBpm) then
+      image ("ui-ready") (0) (10) (100)
+    end
+    if rawms > (-120000 / currentBpm) and rawms <= (-60000 / currentBpm) then
+      image ("ui-set") (0) (10) (100)
+    end
+    if rawms > (-60000 / currentBpm) then
+      image ("ui-go") (0) (10) (100)
+    end
+  end
+end
+
+define !drawGame
+  set [cameraX] to (0)
+  if cameraFocus = 0 then
+    set [cameraX] to (-4)
+  end
+  if cameraFocus = 1 then
+    set [cameraX] to (4)
+  end
+  image (join ("bg-") with (item (selectedTrack) of [trackStages])) (cameraX) (0) (103)
+  set [receptorY] to (112)
+  set [scrollSign] to (1)
+  if downscroll = 1 then
+    set [receptorY] to (-112)
+    set [scrollSign] to (-1)
+  end
+  drawCharacters
+  drawNotes
+  drawReceptors
+  drawHud
+  if mode = "paused" then
+    line (-160) (5) (160) (5) ("#171220") (186)
+    set [textBrightness] to (0)
+    text ("PAUSED") (-67) (59) (190)
+    text ("ENTER / P: RESUME") (-122) (14) (105)
+    text ("R: RESTART SONG") (-119) (-20) (100)
+    text ("SPACE: RETURN TO MENU") (-124) (-54) (90)
+  end
+end
+
+define !drawResults
+  menuBackground
+  line (-199) (5) (199) (5) ("#171220") (274)
+  set [textBrightness] to (0)
+  if mode = "gameover" then
+    text ("GAME OVER") (-131) (97) (240)
+    text ("DON'T STOP FUNKIN'") (-119) (53) (135)
+  else
+    text ("RESULTS") (-119) (98) (240)
+    if misses = 0 then
+      text ("FULL COMBO!") (-72) (59) (125)
+    else
+      text ("SONG CLEARED") (-81) (59) (125)
+    end
+  end
+  text (join ("SCORE ") with (score)) (-165) (19) (110)
+  text (join ("ACCURACY ") with (join (accuracy) with ("%"))) (-165) (-10) (110)
+  text (join ("MISSES ") with (misses)) (-165) (-39) (100)
+  text (join ("MAX COMBO ") with (maxCombo)) (-165) (-66) (100)
+  text (join ("SICK ") with (join (sickCount) with (join ("  GOOD ") with (goodCount)))) (-165) (-93) (85)
+  text ("ENTER RETRY / ESC MENU") (-162) (-124) (95)
+  if botplay = 1 or practice = 1 then
+    text ("UNRANKED") (92) (-94) (70)
+  end
+end
+
+define !drawFrame
+  erase all
+  pen up
+  hide
+  set [textBrightness] to (0)
+  if mode = "title" then
+    drawTitle
+  end
+  if mode = "menu" then
+    drawMainMenu
+  end
+  if mode = "freeplay" then
+    drawFreeplay
+  end
+  if mode = "story" then
+    drawStory
+  end
+  if mode = "options" then
+    drawOptions
+  end
+  if mode = "controls" or mode = "credits" then
+    drawInfo
+  end
+  if mode = "play" or mode = "paused" then
+    drawGame
+  end
+  if mode = "results" or mode = "gameover" then
+    drawResults
+  end
+end
+
+when flag clicked
+  hide
+end
+when I receive [renderFrame]
+  drawFrame
+end
+end

@@ -1,0 +1,653 @@
+# Friday Night Funkin' SBText engine. Chart times are original milliseconds.
+# Expanded by tools/build.py; all gameplay below compiles to ordinary Scratch blocks.
+stage
+@@DATA@@
+@@SOUNDS@@
+var mode = "title"
+var selection = 1
+var selectedTrack = 1
+var difficulty = 2
+var chartIndex = 1
+var chartCount = 0
+var songms = -2400
+var rawms = -2400
+var songOrigin = 0
+var lastms = 0
+var deltaTime = 0
+var songDuration = 0
+var scrollSpeed = 0.25
+var health = 1
+var score = 0
+var combo = 0
+var maxCombo = 0
+var misses = 0
+var hits = 0
+var judged = 0
+var weight = 0
+var accuracy = 100
+var sickCount = 0
+var goodCount = 0
+var badCount = 0
+var shitCount = 0
+var bestScore = 0
+var rating = ""
+var ratingUntil = 0
+var playerPose = 0
+var opponentPose = 0
+var playerUntil = 0
+var opponentUntil = 0
+var segmentIndex = 1
+var segmentEnd = 1
+var pauseWanted = 0
+var pausedAt = 0
+var firstNote = 1
+var noteCount = 0
+var ix = 0
+var jx = 0
+var delta = 0
+var bestDelta = 0
+var nearest = 0
+var laneId = 0
+var noteEnd = 0
+var optionIndex = 1
+var downscroll = 0
+var botplay = 0
+var practice = 0
+var ghostTapping = 1
+var audioOffset = 0
+var masterVolume = 70
+var storyActive = 0
+var weekIndex = 1
+var storyPosition = 1
+var campaignScore = 0
+var campaignMisses = 0
+var campaignAccuracy = 0
+var returnMode = "freeplay"
+var beat = 0
+var bpmIndex = 1
+var bpmEnd = 1
+var currentBpm = 100
+var eventIndex = 1
+var eventEnd = 0
+var cameraFocus = 0
+var baseSpeed = 0.25
+var speedFrom = 0.25
+var speedTo = 0.25
+var speedStart = 0
+var speedEnd = 0
+var tweenPosition = 0
+var beatAnchor = 0
+var frameNumber = 0
+var uiIndex = 1
+var nav = 0
+var action = 0
+var started = 0
+var menuRunning = 0
+list noteTimes
+list noteLanes
+list noteLengths
+list noteStates
+list holdTicks
+list held = [0, 0, 0, 0]
+list tapped = [0, 0, 0, 0]
+list previousHeld = [0, 0, 0, 0]
+list laneKeys = ["left arrow", "down arrow", "up arrow", "right arrow"]
+list laneAliases = ["a", "s", "w", "d"]
+list laneAlternate = ["h", "j", "k", "l"]
+list uiKeys = ["up arrow", "down arrow", "left arrow", "right arrow", "enter", "p", "r", "b", "o", "space"]
+list uiHeld = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+list uiTapped = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+list storyQueue
+list receptorFlash = [0, 0, 0, 0, 0, 0, 0, 0]
+
+# Read key edges once per frame: chords work, held taps do not repeat.
+define !readInputs
+  set [ix] to (1)
+  repeat (4)
+    replace item (ix) of [held] with (0)
+    replace item (ix) of [tapped] with (0)
+    if key (item (ix) of [laneKeys]) pressed? or key (item (ix) of [laneAliases]) pressed? or key (item (ix) of [laneAlternate]) pressed? then
+      replace item (ix) of [held] with (1)
+      if item (ix) of [previousHeld] = 0 then
+        replace item (ix) of [tapped] with (1)
+      end
+    end
+    replace item (ix) of [previousHeld] with (item (ix) of [held])
+    change [ix] by (1)
+  end
+  set [ix] to (1)
+  repeat (length of [uiKeys])
+    replace item (ix) of [uiTapped] with (0)
+    if key (item (ix) of [uiKeys]) pressed? then
+      if item (ix) of [uiHeld] = 0 then
+        replace item (ix) of [uiTapped] with (1)
+      end
+      replace item (ix) of [uiHeld] with (1)
+    else
+      replace item (ix) of [uiHeld] with (0)
+    end
+    change [ix] by (1)
+  end
+end
+
+define !findChart
+  set [chartIndex] to (((selectedTrack - 1) * 5) + difficulty)
+  if item (chartIndex) of [chartStarts] = 0 then
+    set [difficulty] to (item (selectedTrack) of [defaultDifficulties])
+    set [chartIndex] to (((selectedTrack - 1) * 5) + difficulty)
+  end
+end
+
+define !cycleDifficulty (stepAmount)
+  change [difficulty] by (stepAmount)
+  set [difficulty] to (((difficulty - 1) % 5) + 1)
+  set [chartIndex] to (((selectedTrack - 1) * 5) + difficulty)
+  repeat until item (chartIndex) of [chartStarts] > 0
+    change [difficulty] by (stepAmount)
+    set [difficulty] to (((difficulty - 1) % 5) + 1)
+    set [chartIndex] to (((selectedTrack - 1) * 5) + difficulty)
+  end
+end
+
+define !loadSong
+  stop all sounds
+  findChart
+  delete all of [noteTimes]
+  delete all of [noteLanes]
+  delete all of [noteLengths]
+  delete all of [noteStates]
+  delete all of [holdTicks]
+  set [ix] to (item (chartIndex) of [chartStarts])
+  set [noteCount] to ((item (chartIndex) of [chartEnds]) - ix + 1)
+  repeat (noteCount)
+    add (item (ix) of [allTimes]) to [noteTimes]
+    add (item (ix) of [allLanes]) to [noteLanes]
+    add (item (ix) of [allLengths]) to [noteLengths]
+    add (0) to [noteStates]
+    add (0) to [holdTicks]
+    change [ix] by (1)
+  end
+  set [score] to (0)
+  set [combo] to (0)
+  set [maxCombo] to (0)
+  set [misses] to (0)
+  set [hits] to (0)
+  set [judged] to (0)
+  set [weight] to (0)
+  set [accuracy] to (100)
+  set [sickCount] to (0)
+  set [goodCount] to (0)
+  set [badCount] to (0)
+  set [shitCount] to (0)
+  set [health] to (1)
+  set [rating] to ("")
+  set [firstNote] to (1)
+  set [playerPose] to (0)
+  set [opponentPose] to (0)
+  set [playerUntil] to (0)
+  set [opponentUntil] to (0)
+  set [pauseWanted] to (0)
+  set [segmentIndex] to (item (selectedTrack) of [trackSegmentStarts])
+  set [segmentEnd] to (item (selectedTrack) of [trackSegmentEnds])
+  set [bpmIndex] to (item (selectedTrack) of [trackBpmStarts])
+  set [bpmEnd] to (item (selectedTrack) of [trackBpmEnds])
+  set [currentBpm] to (item (bpmIndex) of [bpmValues])
+  set [beatAnchor] to (0)
+  set [songDuration] to (item (selectedTrack) of [trackDurations])
+  set [eventIndex] to (item (selectedTrack) of [trackEventStarts])
+  set [eventEnd] to (item (selectedTrack) of [trackEventEnds])
+  set [cameraFocus] to (0)
+  set [scrollSpeed] to ((item (chartIndex) of [chartSpeeds]) * 0.16875)
+  set [baseSpeed] to (scrollSpeed)
+  set [speedFrom] to (scrollSpeed)
+  set [speedTo] to (scrollSpeed)
+  set [speedStart] to (0)
+  set [speedEnd] to (0)
+  set [songms] to (-240000 / currentBpm)
+  set [rawms] to (songms)
+  set [lastms] to (songms)
+  set [songOrigin] to ((timer * 1000) - songms)
+  set [started] to (0)
+  set [mode] to ("play")
+end
+
+define !missNote
+  change [misses] by (1)
+  change [judged] by (1)
+  change [score] by (-100)
+  set [combo] to (0)
+  change [health] by (-0.08)
+  set [rating] to ("MISS")
+  set [ratingUntil] to (songms + 450)
+end
+
+# PBOT1 timing, score curve and health bonuses follow Funkin's Scoring.hx.
+define !judgeNote (noteId)
+  set [delta] to (abs ((item (noteId) of [noteTimes]) - songms))
+  if botplay = 1 then
+    set [delta] to (0)
+  end
+  if delta < 5 then
+    change [score] by (500)
+  else
+    change [score] by (floor ((500 * (1 - (1 / (1 + e ^ (-0.08 * (delta - 54.99)))))) + 9))
+  end
+  change [hits] by (1)
+  change [judged] by (1)
+  change [combo] by (1)
+  set [playerPose] to ((item (noteId) of [noteLanes]) + 1)
+  set [playerUntil] to (songms + 160 + (item (noteId) of [noteLengths]))
+  replace item ((item (noteId) of [noteLanes]) + 5) of [receptorFlash] with (songms + 100)
+  if delta <= 45 then
+    set [rating] to ("SICK")
+    change [sickCount] by (1)
+    change [weight] by (1)
+    change [health] by (0.03)
+  else
+    if delta <= 90 then
+      set [rating] to ("GOOD")
+      change [goodCount] by (1)
+      change [weight] by (0.75)
+      change [health] by (0.015)
+    else
+      if delta <= 135 then
+        set [rating] to ("BAD")
+        change [badCount] by (1)
+        change [weight] by (0.4)
+      else
+        set [rating] to ("SHIT")
+        change [shitCount] by (1)
+        change [weight] by (0.1)
+        change [health] by (-0.02)
+      end
+      set [combo] to (0)
+    end
+  end
+  if combo > maxCombo then
+    set [maxCombo] to (combo)
+  end
+  set [ratingUntil] to (songms + 450)
+  if item (noteId) of [noteLengths] > 20 then
+    replace item (noteId) of [noteStates] with (1)
+    replace item (noteId) of [holdTicks] with (songms)
+  else
+    replace item (noteId) of [noteStates] with (2)
+  end
+end
+
+define !hitLane (whichLane)
+  set [nearest] to (0)
+  set [bestDelta] to (161)
+  set [jx] to (firstNote)
+  repeat until jx > noteCount or item (jx) of [noteTimes] > songms + 160
+    if item (jx) of [noteLanes] = whichLane and item (jx) of [noteStates] = 0 then
+      set [delta] to (abs ((item (jx) of [noteTimes]) - songms))
+      if delta < bestDelta then
+        set [bestDelta] to (delta)
+        set [nearest] to (jx)
+      end
+    end
+    change [jx] by (1)
+  end
+  if nearest > 0 then
+    judgeNote (nearest)
+  else
+    if ghostTapping = 0 and rawms >= 0 then
+      missNote
+    end
+  end
+end
+
+define !processNotes
+  set [laneId] to (1)
+  repeat (4)
+    if item (laneId) of [tapped] = 1 and botplay = 0 then
+      hitLane (laneId - 1)
+    end
+    change [laneId] by (1)
+  end
+  set [ix] to (firstNote)
+  repeat until ix > noteCount or item (ix) of [noteTimes] > songms + 160
+    set [noteEnd] to ((item (ix) of [noteTimes]) + (item (ix) of [noteLengths]))
+    if item (ix) of [noteLanes] >= 4 then
+      if item (ix) of [noteStates] = 0 and item (ix) of [noteTimes] <= songms then
+        replace item (ix) of [noteStates] with (2)
+        set [opponentPose] to (((item (ix) of [noteLanes]) % 4) + 1)
+        set [opponentUntil] to (noteEnd + 160)
+        replace item (((item (ix) of [noteLanes]) % 4) + 1) of [receptorFlash] with (songms + 100)
+      end
+    else
+      if item (ix) of [noteStates] = 0 then
+        if botplay = 1 and item (ix) of [noteTimes] <= songms then
+          judgeNote (ix)
+        else
+          if songms > (item (ix) of [noteTimes]) + 160 then
+            replace item (ix) of [noteStates] with (-1)
+            missNote
+          end
+        end
+      end
+      if item (ix) of [noteStates] = 1 then
+        if songms >= noteEnd then
+          replace item (ix) of [noteStates] with (2)
+        else
+          if item ((item (ix) of [noteLanes]) + 1) of [held] = 1 or botplay = 1 then
+            replace item (ix) of [holdTicks] with (songms)
+            change [health] by (deltaTime * 0.00012)
+          else
+            if songms - (item (ix) of [holdTicks]) > 140 then
+              replace item (ix) of [noteStates] with (-1)
+              change [misses] by (1)
+              set [combo] to (0)
+              set [rating] to ("HOLD DROP")
+              set [ratingUntil] to (songms + 450)
+            end
+          end
+        end
+      end
+    end
+    change [ix] by (1)
+  end
+  repeat until firstNote > noteCount or (item (firstNote) of [noteTimes]) + (item (firstNote) of [noteLengths]) + 180 >= songms
+    change [firstNote] by (1)
+  end
+  if health > 2 then
+    set [health] to (2)
+  end
+  if judged > 0 then
+    set [accuracy] to ((round (weight / judged * 10000)) / 100)
+  end
+end
+
+define !finishSong
+  stop all sounds
+  if score > (item (chartIndex) of [highScores]) and botplay = 0 and practice = 0 then
+    replace item (chartIndex) of [highScores] with (score)
+  end
+  set [bestScore] to (item (chartIndex) of [highScores])
+  change [campaignScore] by (score)
+  change [campaignMisses] by (misses)
+  change [campaignAccuracy] by (accuracy)
+  if storyActive = 1 and storyPosition < length of [storyQueue] then
+    change [storyPosition] by (1)
+    set [selectedTrack] to (item (storyPosition) of [storyQueue])
+    loadSong
+  else
+    if storyActive = 1 then
+      set [score] to (campaignScore)
+      set [misses] to (campaignMisses)
+      set [accuracy] to ((round (campaignAccuracy / storyPosition * 100)) / 100)
+    end
+    set [mode] to ("results")
+    start sound ("confirmMenu")
+  end
+end
+
+# Import original camera focus and scroll-speed events along with BPM changes.
+define !processEvents
+  repeat until eventIndex > eventEnd or item (eventIndex) of [eventTimes] > rawms
+    if item (eventIndex) of [eventKinds] = 1 then
+      set [cameraFocus] to (item (eventIndex) of [eventValue0])
+    end
+    if item (eventIndex) of [eventKinds] = 2 then
+      set [speedFrom] to (scrollSpeed)
+      if item (eventIndex) of [eventValue2] = 1 then
+        set [speedTo] to ((item (eventIndex) of [eventValue0]) * 0.16875)
+      else
+        set [speedTo] to (baseSpeed * (item (eventIndex) of [eventValue0]))
+      end
+      set [speedStart] to (item (eventIndex) of [eventTimes])
+      set [speedEnd] to (speedStart + ((item (eventIndex) of [eventValue1]) * 15000 / currentBpm))
+    end
+    change [eventIndex] by (1)
+  end
+  if speedEnd > rawms and speedEnd > speedStart then
+    set [tweenPosition] to ((rawms - speedStart) / (speedEnd - speedStart))
+    set [scrollSpeed] to (speedFrom + ((speedTo - speedFrom) * tweenPosition))
+  else
+    set [scrollSpeed] to (speedTo)
+  end
+end
+
+define !playTick
+  set [rawms] to ((timer * 1000) - songOrigin)
+  set [songms] to (rawms + audioOffset)
+  if item (6) of [uiTapped] = 1 then
+    if rawms < 0 then
+      set [pausedAt] to (rawms)
+      set [mode] to ("paused")
+    else
+      set [pauseWanted] to (1)
+    end
+  end
+  if rawms >= 0 and segmentIndex <= segmentEnd and mode = "play" then
+    if rawms >= item (segmentIndex) of [segmentTimes] then
+      if pauseWanted = 1 then
+        set [pausedAt] to (item (segmentIndex) of [segmentTimes])
+        set [rawms] to (pausedAt)
+        set [songms] to (rawms + audioOffset)
+        set [pauseWanted] to (0)
+        set [mode] to ("paused")
+        stop all sounds
+      else
+        # Skip obsolete chunks after a stalled frame, keeping the clock authoritative.
+        repeat until segmentIndex >= segmentEnd or item (segmentIndex + 1) of [segmentTimes] > rawms
+          change [segmentIndex] by (1)
+        end
+        start sound (join ("s") with (segmentIndex))
+        change [segmentIndex] by (1)
+      end
+    end
+  end
+  if mode = "play" then
+    set [deltaTime] to (songms - lastms)
+    if deltaTime > 100 then
+      set [deltaTime] to (100)
+    end
+    if deltaTime < 0 then
+      set [deltaTime] to (0)
+    end
+    set [lastms] to (songms)
+    if bpmIndex < bpmEnd then
+      if rawms >= item (bpmIndex + 1) of [bpmTimes] then
+        change [bpmIndex] by (1)
+        set [currentBpm] to (item (bpmIndex) of [bpmValues])
+        set [beatAnchor] to (item (bpmIndex) of [bpmBeats])
+      end
+    end
+    set [beat] to (beatAnchor + ((rawms - (item (bpmIndex) of [bpmTimes])) * currentBpm / 60000))
+    processEvents
+    processNotes
+    if health <= 0 and practice = 0 then
+      set [health] to (0)
+      set [mode] to ("gameover")
+      stop all sounds
+      start sound ("cancelMenu")
+    else
+      if rawms > songDuration + 250 then
+        finishSong
+      end
+    end
+  end
+end
+
+define !startStory
+  delete all of [storyQueue]
+  set [ix] to (item (weekIndex) of [weekStarts])
+  repeat ((item (weekIndex) of [weekEnds]) - ix + 1)
+    add (item (ix) of [weekTracks]) to [storyQueue]
+    change [ix] by (1)
+  end
+  set [storyActive] to (1)
+  set [storyPosition] to (1)
+  set [campaignScore] to (0)
+  set [campaignMisses] to (0)
+  set [campaignAccuracy] to (0)
+  set [selectedTrack] to (item (1) of [storyQueue])
+  loadSong
+end
+
+define !leaveGame
+  stop all sounds
+  set [mode] to (returnMode)
+  set [storyActive] to (0)
+  broadcast [menuMusic]
+end
+
+define !changeOption (amount)
+  if optionIndex = 1 then
+    set [downscroll] to (1 - downscroll)
+  end
+  if optionIndex = 2 then
+    set [ghostTapping] to (1 - ghostTapping)
+  end
+  if optionIndex = 3 then
+    set [practice] to (1 - practice)
+  end
+  if optionIndex = 4 then
+    set [botplay] to (1 - botplay)
+  end
+  if optionIndex = 5 then
+    change [audioOffset] by (amount * 5)
+  end
+  if optionIndex = 6 then
+    change [masterVolume] by (amount * 5)
+    if masterVolume > 100 then
+      set [masterVolume] to (100)
+    end
+    if masterVolume < 0 then
+      set [masterVolume] to (0)
+    end
+    set volume to (masterVolume)
+  end
+end
+
+define !menuTick
+  set [nav] to ((item (2) of [uiTapped]) - (item (1) of [uiTapped]))
+  set [action] to ((item (4) of [uiTapped]) - (item (3) of [uiTapped]))
+  if nav != 0 or action != 0 then
+    start sound ("scrollMenu")
+  end
+  if mode = "title" then
+    if item (5) of [uiTapped] = 1 or item (10) of [uiTapped] = 1 then
+      set [mode] to ("menu")
+      start sound ("confirmMenu")
+    end
+  else
+    if mode = "menu" then
+      set [selection] to (((selection + nav - 1) % 5) + 1)
+      if item (5) of [uiTapped] = 1 then
+        if selection = 1 then
+          set [mode] to ("story")
+          set [returnMode] to ("story")
+        end
+        if selection = 2 then
+          set [mode] to ("freeplay")
+          set [returnMode] to ("freeplay")
+        end
+        if selection = 3 then
+          set [mode] to ("options")
+        end
+        if selection = 4 then
+          set [mode] to ("controls")
+        end
+        if selection = 5 then
+          set [mode] to ("credits")
+        end
+        start sound ("confirmMenu")
+      end
+    else
+      if mode = "freeplay" then
+        set [selectedTrack] to (((selectedTrack + nav - 1) % (length of [trackTitles])) + 1)
+        findChart
+        if action != 0 then
+          cycleDifficulty (action)
+        end
+        if item (8) of [uiTapped] = 1 then
+          set [botplay] to (1 - botplay)
+        end
+        if item (5) of [uiTapped] = 1 then
+          set [storyActive] to (0)
+          loadSong
+        end
+      end
+      if mode = "story" then
+        set [weekIndex] to (((weekIndex + nav - 1) % (length of [weekTitles])) + 1)
+        set [selectedTrack] to (item (item (weekIndex) of [weekStarts]) of [weekTracks])
+        findChart
+        if action != 0 then
+          cycleDifficulty (action)
+        end
+        if item (5) of [uiTapped] = 1 then
+          startStory
+        end
+      end
+      if mode = "options" then
+        set [optionIndex] to (((optionIndex + nav - 1) % 6) + 1)
+        if action != 0 then
+          changeOption (action)
+        end
+      end
+      if item (6) of [uiTapped] = 1 and mode != "play" then
+        set [mode] to ("menu")
+        start sound ("cancelMenu")
+      end
+    end
+  end
+end
+
+when flag clicked
+  set [mode] to ("title")
+  set [selection] to (1)
+  set [selectedTrack] to (item (1) of [weekTracks])
+  set [difficulty] to (2)
+  set [storyActive] to (0)
+  set [frameNumber] to (0)
+  set volume to (masterVolume)
+  reset timer
+  broadcast [menuMusic]
+  forever
+    readInputs
+    change [frameNumber] by (1)
+    if mode = "play" then
+      playTick
+    else
+      if mode = "paused" then
+        if item (5) of [uiTapped] = 1 or item (6) of [uiTapped] = 1 then
+          set [songOrigin] to ((timer * 1000) - pausedAt)
+          set [lastms] to (pausedAt + audioOffset)
+          set [mode] to ("play")
+        end
+        if item (7) of [uiTapped] = 1 then
+          loadSong
+        end
+        if item (10) of [uiTapped] = 1 then
+          leaveGame
+        end
+      else
+        if mode = "results" or mode = "gameover" then
+          if item (5) of [uiTapped] = 1 or item (7) of [uiTapped] = 1 then
+            if storyActive = 1 then
+              startStory
+            else
+              loadSong
+            end
+          end
+          if item (6) of [uiTapped] = 1 then
+            leaveGame
+          end
+        else
+          menuTick
+        end
+      end
+    end
+    broadcast and wait [renderFrame]
+  end
+end
+
+when I receive [menuMusic]
+  repeat until mode = "play" or mode = "paused"
+    play sound ("menu") until done
+  end
+end
+end

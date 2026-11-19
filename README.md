@@ -139,3 +139,9 @@ What it does today:
 - supports an MVP clicker protection mode that renames the real variable, adds a fake visible variable, and writes checksum metadata for later stronger protection
 
 This is not real security. Scratch projects are always inspectable. The goal is to discourage casual tampering, not stop determined reverse engineering.
+
+## Friday Night Funkin example
+
+[`examples/funkin`](examples/funkin/README.md) is a complete playable Scratch adaptation pipeline using pinned upstream Funkin charts and media: 61 tracks, 167 difficulty charts, story/freeplay menus, PBOT1 scoring, sustains, pause/resume, and animated characters. Downloaded media stays outside Git; see the example README for build steps and scope.
+
+Sound playback and keyboard sensing accept runtime reporter expressions (variables, list items, joins, and procedure arguments). Exponential reporters `e ^ (...)` and `10 ^ (...)` compile to native Scratch math blocks.

@@ -1400,6 +1400,23 @@ impl Parser {
         if stop_types.contains(&token.typ) {
             return self.error_here("Expected expression.");
         }
+        // Scratch's exponential reporters have two-token names. Recognize
+        // them before ordinary identifiers and number literals.
+        if ((matches!(token.typ, TokenType::Ident | TokenType::Keyword)
+            && token.value.eq_ignore_ascii_case("e"))
+            || (token.typ == TokenType::Number && token.value == "10"))
+            && self.peek().typ == TokenType::Op
+            && self.peek().value == "^"
+        {
+            self.advance();
+            self.advance();
+            let value = self.parse_wrapped_expression()?;
+            return Ok(Expr::MathFunc {
+                pos: token.pos,
+                op: format!("{} ^", token.value.to_ascii_lowercase()),
+                value: Box::new(value),
+            });
+        }
         if self.check_keyword("pick") {
             return self.parse_pick_random_expr();
         }

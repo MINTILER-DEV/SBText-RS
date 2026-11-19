@@ -172,7 +172,7 @@ impl<'a> Lexer<'a> {
                         pos,
                     });
                 }
-                '+' | '-' | '*' | '/' | '%' => {
+                '+' | '-' | '*' | '/' | '%' | '^' => {
                     self.advance();
                     tokens.push(Token {
                         typ: TokenType::Op,

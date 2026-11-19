@@ -74,7 +74,7 @@ Import line notes:
 - Identifiers: start with letter/`_`; continue with letters, digits, `_`, `?`, and `.`.
 - Numbers: ASCII digits, optional single decimal point.
 - Strings: `"..."` with escapes `\"`, `\\`, `\n`, `\r`, `\t`.
-- Operators: `+ - * / % = == != < <= > >=`.
+- Operators: `+ - * / % ^ = == != < <= > >=`.
 - Delimiters: `(` `)` `[` `]` `,`.
 
 ### 4.4 Reserved keywords
@@ -352,7 +352,7 @@ floor (expr)
 round (expr)
 ```
 
-`key (expr) pressed` (without `?`) is also accepted.
+`key (expr) pressed` (without `?`) is also accepted. Key selectors preserve reporter expressions, including list items, variables, and numeric ASCII keycodes. The `^` token is used by `e ^ (...)` and `10 ^ (...)`; it is not a general binary exponentiation operator.
 
 Supported math functions:
 

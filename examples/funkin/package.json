@@ -1,0 +1,22 @@
+{
+  "name": "funkin-sbtext",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Scratch VM player and integration tests for the SBText FNF remake",
+  "scripts": {
+    "play": "python3 tools/play.py",
+    "test": "node tools/test-runtime.cjs",
+    "postinstall": "node tools/bundle.cjs",
+    "test:full-audio": "node tools/test-runtime.cjs --full-audio"
+  },
+  "devDependencies": {
+    "scratch-vm": "5.0.300",
+    "scratch-render": "2.2.84",
+    "scratch-storage": "6.2.1",
+    "scratch-audio": "2.0.275",
+    "playwright": "1.65.1",
+    "esbuild": "0.28.2",
+    "events": "3.3.0",
+    "scratch-svg-renderer": "3.1.19"
+  }
+}

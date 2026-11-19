@@ -1722,6 +1722,9 @@ impl<'a> ProjectBuilder<'a> {
                 "sound_play",
                 sound,
                 "sound_play",
+                variables_map,
+                lists_map,
+                param_scope,
             )?)),
             Statement::PlaySoundUntilDone { sound, .. } => Ok(single(self.emit_sound_menu_stmt(
                 blocks,
@@ -1729,6 +1732,9 @@ impl<'a> ProjectBuilder<'a> {
                 "sound_playuntildone",
                 sound,
                 "sound_play",
+                variables_map,
+                lists_map,
+                param_scope,
             )?)),
             Statement::StopAllSounds { .. } => Ok(single(self.emit_no_input_stmt(
                 blocks,
@@ -2349,6 +2355,7 @@ impl<'a> ProjectBuilder<'a> {
         Ok(block_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn emit_sound_menu_stmt(
         &mut self,
         blocks: &mut Map<String, Value>,
@@ -2356,8 +2363,24 @@ impl<'a> ProjectBuilder<'a> {
         opcode: &str,
         sound: &Expr,
         fallback_sound: &str,
+        variables_map: &HashMap<String, String>,
+        lists_map: &HashMap<String, String>,
+        param_scope: &HashSet<String>,
     ) -> Result<String> {
         let block_id = self.new_block_id();
+        // Only literals belong in the shadow menu. Reporter expressions must
+        // remain connected inputs so Scratch can select sounds at runtime.
+        if !matches!(sound, Expr::String { .. } | Expr::Number { .. }) {
+            let input = self.expr_input(
+                blocks, sound, &block_id, variables_map, lists_map, param_scope, "string",
+            )?;
+            blocks.insert(block_id.clone(), json!({
+                "opcode": opcode, "next": Value::Null, "parent": parent_id,
+                "inputs": {"SOUND_MENU": input}, "fields": {},
+                "shadow": false, "topLevel": false
+            }));
+            return Ok(block_id);
+        }
         let menu_id = self.new_block_id();
         let sound_value = self.menu_text_from_expr(sound, fallback_sound);
         blocks.insert(
@@ -3670,6 +3693,17 @@ impl<'a> ProjectBuilder<'a> {
             }
             Expr::KeyPressed { key, .. } => {
                 let block_id = self.new_block_id();
+                if !matches!(key.as_ref(), Expr::String { .. }) {
+                    let input = self.expr_input(
+                        blocks, key, &block_id, variables_map, lists_map, param_scope, "string",
+                    )?;
+                    blocks.insert(block_id.clone(), json!({
+                        "opcode": "sensing_keypressed", "next": Value::Null,
+                        "parent": parent_id, "inputs": {"KEY_OPTION": input},
+                        "fields": {}, "shadow": false, "topLevel": false
+                    }));
+                    return Ok(Some(block_id));
+                }
                 let menu_id = self.new_block_id();
                 blocks.insert(
                     block_id.clone(),
@@ -4691,6 +4725,8 @@ fn is_mathop_reporter(op: &str) -> bool {
             | "atan"
             | "ln"
             | "log"
+            | "e ^"
+            | "10 ^"
     )
 }
 

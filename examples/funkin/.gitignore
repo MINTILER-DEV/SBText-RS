@@ -1,0 +1,6 @@
+/cache/
+/assets/
+/build/
+/node_modules
+/generated/
+__pycache__/
